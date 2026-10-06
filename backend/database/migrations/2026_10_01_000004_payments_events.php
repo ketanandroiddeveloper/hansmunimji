@@ -1,0 +1,125 @@
+<?php
+
+declare(strict_types=1);
+
+$table = 'ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci';
+
+return [
+    'up' => [
+        "CREATE TABLE events (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            slug VARCHAR(160) NOT NULL UNIQUE,
+            title VARCHAR(255) NOT NULL,
+            category ENUM('retreat','full_moon','amavasya','keynote','executive_gathering','group_advisory','summit') NOT NULL,
+            summary TEXT NULL,
+            description MEDIUMTEXT NULL,
+            cover_media_id BIGINT UNSIGNED NULL,
+            city_id INT UNSIGNED NULL,
+            venue VARCHAR(255) NULL,
+            address VARCHAR(500) NULL,
+            starts_at DATETIME NOT NULL,
+            ends_at DATETIME NOT NULL,
+            timezone VARCHAR(64) NOT NULL,
+            seat_quota INT UNSIGNED NULL,
+            registration_mode ENUM('open','application','invitation','closed') NOT NULL DEFAULT 'application',
+            requirements TEXT NULL,
+            currency CHAR(3) NULL,
+            price_minor BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            status ENUM('draft','published','cancelled','archived') NOT NULL DEFAULT 'draft',
+            is_featured TINYINT(1) NOT NULL DEFAULT 0,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            KEY events_status_idx (status, starts_at),
+            CONSTRAINT events_cover_fk FOREIGN KEY (cover_media_id) REFERENCES media(id) ON DELETE SET NULL,
+            CONSTRAINT events_city_fk FOREIGN KEY (city_id) REFERENCES cities(id) ON DELETE SET NULL
+        ) {$table}",
+
+        "CREATE TABLE event_registrations (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            event_id BIGINT UNSIGNED NOT NULL,
+            reference VARCHAR(24) NOT NULL UNIQUE,
+            access_token_hash CHAR(64) NOT NULL,
+            email_bidx CHAR(64) NOT NULL,
+            name_enc TEXT NOT NULL,
+            email_enc TEXT NOT NULL,
+            phone_enc TEXT NULL,
+            notes_enc TEXT NULL,
+            seats TINYINT UNSIGNED NOT NULL DEFAULT 1,
+            status ENUM('pending_application','pending_payment','confirmed','cancelled','refunded','waitlisted') NOT NULL,
+            currency CHAR(3) NULL,
+            amount_minor BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            hold_expires_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE KEY registrations_event_email_unique (event_id, email_bidx),
+            KEY registrations_status_idx (event_id, status),
+            CONSTRAINT registrations_event_fk FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        ) {$table}",
+
+        "CREATE TABLE payments (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            payable_type ENUM('appointment','event_registration') NOT NULL,
+            payable_id BIGINT UNSIGNED NOT NULL,
+            gateway ENUM('razorpay','stripe') NOT NULL,
+            environment VARCHAR(20) NOT NULL,
+            gateway_order_id VARCHAR(191) NOT NULL,
+            gateway_payment_id VARCHAR(191) NULL,
+            currency CHAR(3) NOT NULL,
+            amount_minor BIGINT UNSIGNED NOT NULL,
+            refunded_minor BIGINT UNSIGNED NOT NULL DEFAULT 0,
+            status ENUM('created','pending','captured','failed','refunded','partially_refunded','cancelled') NOT NULL DEFAULT 'created',
+            idempotency_key VARCHAR(64) NULL,
+            receipt_number VARCHAR(40) NULL,
+            failure_reason VARCHAR(255) NULL,
+            metadata JSON NULL,
+            verified_at DATETIME NULL,
+            captured_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE KEY payments_order_unique (gateway, gateway_order_id),
+            UNIQUE KEY payments_idempotency_unique (idempotency_key),
+            UNIQUE KEY payments_receipt_unique (receipt_number),
+            KEY payments_payable_idx (payable_type, payable_id),
+            KEY payments_status_idx (status, created_at),
+            KEY payments_gateway_payment_idx (gateway_payment_id)
+        ) {$table}",
+
+        "CREATE TABLE refunds (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            payment_id BIGINT UNSIGNED NOT NULL,
+            gateway_refund_id VARCHAR(191) NULL,
+            amount_minor BIGINT UNSIGNED NOT NULL,
+            currency CHAR(3) NOT NULL,
+            status ENUM('pending','processed','failed') NOT NULL DEFAULT 'pending',
+            reason VARCHAR(255) NULL,
+            initiated_by BIGINT UNSIGNED NULL,
+            idempotency_key VARCHAR(64) NOT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE KEY refunds_gateway_unique (gateway_refund_id),
+            UNIQUE KEY refunds_idempotency_unique (idempotency_key),
+            CONSTRAINT refunds_payment_fk FOREIGN KEY (payment_id) REFERENCES payments(id),
+            CONSTRAINT refunds_user_fk FOREIGN KEY (initiated_by) REFERENCES users(id) ON DELETE SET NULL
+        ) {$table}",
+
+        "CREATE TABLE webhook_events (
+            id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            gateway VARCHAR(20) NOT NULL,
+            event_id VARCHAR(191) NOT NULL,
+            event_type VARCHAR(120) NOT NULL,
+            payload_hash CHAR(64) NOT NULL,
+            status ENUM('received','processed','ignored','failed') NOT NULL DEFAULT 'received',
+            error VARCHAR(255) NULL,
+            received_at DATETIME NOT NULL,
+            processed_at DATETIME NULL,
+            UNIQUE KEY webhook_event_unique (gateway, event_id)
+        ) {$table}",
+    ],
+    'down' => [
+        'DROP TABLE IF EXISTS webhook_events',
+        'DROP TABLE IF EXISTS refunds',
+        'DROP TABLE IF EXISTS payments',
+        'DROP TABLE IF EXISTS event_registrations',
+        'DROP TABLE IF EXISTS events',
+    ],
+];

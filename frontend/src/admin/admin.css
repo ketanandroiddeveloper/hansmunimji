@@ -1,0 +1,57 @@
+/* Content typography inside the admin rich-text editor. */
+.prose-admin {
+  color: var(--color-ivory-200);
+  font-size: 0.95rem;
+  font-weight: 300;
+  line-height: 1.7;
+}
+.prose-admin > * + * {
+  margin-top: 0.85em;
+}
+.prose-admin h2,
+.prose-admin h3,
+.prose-admin h4 {
+  color: var(--color-ivory-50);
+  font-family: var(--font-display);
+  font-weight: 400;
+  line-height: 1.2;
+}
+.prose-admin h2 {
+  font-size: 1.6rem;
+}
+.prose-admin h3 {
+  font-size: 1.3rem;
+}
+.prose-admin h4 {
+  font-size: 1.1rem;
+}
+.prose-admin ul {
+  list-style: disc;
+  padding-left: 1.4em;
+}
+.prose-admin ol {
+  list-style: decimal;
+  padding-left: 1.4em;
+}
+.prose-admin blockquote {
+  border-left: 2px solid var(--line-gold);
+  padding-left: 1em;
+  font-style: italic;
+}
+.prose-admin a {
+  color: var(--color-champagne-200);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.prose-admin hr {
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  margin: 1.5em 0;
+}
+.prose-admin p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-slate-400);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

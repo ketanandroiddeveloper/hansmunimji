@@ -1,0 +1,63 @@
+/*
+ * Design tokens — single source of truth (see docs/design-system.md).
+ * Exposed to Tailwind through @theme so utilities like `bg-midnight-900` and `font-display` exist.
+ */
+@theme {
+  --color-*: initial;
+
+  --color-midnight-950: #070b14;
+  --color-midnight-900: #0b1220;
+  --color-midnight-800: #111a2c;
+  --color-charcoal-800: #1a1d23;
+  --color-slate-600: #3a4556;
+  --color-slate-400: #8a94a6;
+  --color-emerald-700: #0f4c3a;
+  --color-emerald-500: #1f7a5c;
+  --color-emerald-300: #7fb8a0;
+  --color-champagne-400: #c9b07a;
+  --color-champagne-200: #e6d7b0;
+  --color-ivory-50: #f7f3ea;
+  --color-ivory-200: #e9e2d3;
+  --color-danger-300: #e8a3a3;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-black: #000;
+  --color-white: #fff;
+
+  --font-display: 'Cormorant Garamond', 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+  --font-sans: 'Manrope Variable', 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --text-display: clamp(3rem, 1.6rem + 6vw, 7.5rem);
+  --text-display--line-height: 0.95;
+  --text-display--letter-spacing: -0.02em;
+  --text-h1: clamp(2.5rem, 1.8rem + 3vw, 4.5rem);
+  --text-h1--line-height: 1.02;
+  --text-h1--letter-spacing: -0.015em;
+  --text-h2: clamp(2rem, 1.55rem + 2vw, 3.25rem);
+  --text-h2--line-height: 1.08;
+  --text-h2--letter-spacing: -0.01em;
+  --text-h3: clamp(1.5rem, 1.35rem + 0.6vw, 2rem);
+  --text-h3--line-height: 1.15;
+  --text-body-l: clamp(1.125rem, 1.08rem + 0.2vw, 1.25rem);
+  --text-body-l--line-height: 1.7;
+  --text-eyebrow: 0.68rem;
+  --text-eyebrow--line-height: 1;
+  --text-eyebrow--letter-spacing: 0.32em;
+
+  --ease-expo: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --container-site: 1320px;
+
+  --radius-arch: 999px 999px 0 0;
+}
+
+:root {
+  --line-faint: rgb(247 243 234 / 0.08);
+  --line: rgb(247 243 234 / 0.12);
+  --line-strong: rgb(247 243 234 / 0.2);
+  --line-gold: rgb(201 176 122 / 0.45);
+  --header-h: 5.5rem;
+  --ribbon-h: 0px;
+
+  color-scheme: dark;
+}

@@ -1,0 +1,27 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use App\Console\Application;
+
+if (PHP_SAPI !== 'cli') {
+    exit(1);
+}
+
+$command = $argv[1] ?? 'help';
+
+// keys:generate must work before any keys exist, so it runs without booting the app.
+if ($command === 'keys:generate') {
+    require dirname(__DIR__) . '/vendor/autoload.php';
+    exit((new Application(null))->run($argv));
+}
+
+try {
+    $container = require dirname(__DIR__) . '/app/bootstrap.php';
+} catch (\Throwable $e) {
+    fwrite(STDERR, 'Boot failed: ' . $e->getMessage() . PHP_EOL);
+    exit(1);
+}
+
+exit((new Application($container))->run($argv));
