@@ -71,13 +71,13 @@ export default function JournalPage() {
 
           {totalPages > 1 && (
             <nav aria-label="Journal pages" className="mt-24 flex items-center justify-between border-t border-[var(--line)] pt-8 text-[0.7rem] uppercase tracking-[0.24em]">
-              <button type="button" disabled={current <= 1} onClick={() => go(current - 1)} className="text-ivory-200/80 hover:text-champagne-200 disabled:invisible">
+              <button type="button" disabled={current <= 1} onClick={() => go(current - 1)} className="-my-3 py-3 text-ivory-200/80 hover:text-champagne-200 disabled:invisible">
                 ← Newer
               </button>
               <span className="text-slate-400">
                 Page {current} of {totalPages}
               </span>
-              <button type="button" disabled={current >= totalPages} onClick={() => go(current + 1)} className="text-ivory-200/80 hover:text-champagne-200 disabled:invisible">
+              <button type="button" disabled={current >= totalPages} onClick={() => go(current + 1)} className="-my-3 py-3 text-ivory-200/80 hover:text-champagne-200 disabled:invisible">
                 Older →
               </button>
             </nav>

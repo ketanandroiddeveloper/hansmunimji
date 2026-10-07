@@ -56,7 +56,7 @@ export default function RegistrationPage() {
   })
 
   const shell = (content: ReactNode) => (
-    <section className="grain relative min-h-screen bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
+    <section className="grain relative min-h-svh bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
       <Seo title="Your registration" noindex />
       <Container className="relative">{content}</Container>
     </section>
@@ -175,7 +175,7 @@ export default function RegistrationPage() {
             />
           </>
         ) : (
-          <div className="border border-[var(--line)] bg-midnight-900/50 p-8">
+          <div className="border border-[var(--line)] bg-midnight-900/50 p-6 sm:p-8">
             <ConfidentialitySeal label="Confidential · Encrypted registration" />
             <div className="mt-8">
               <ButtonLink to="/gatherings" variant="link">
@@ -221,7 +221,7 @@ function CancelPanel({ registration: r, token, onClose, onDone }: { registration
   }
 
   return (
-    <div className="mt-10 border border-[var(--line-strong)] p-8" role="region" aria-labelledby="cancel-title">
+    <div className="mt-10 border border-[var(--line-strong)] p-6 sm:p-8" role="region" aria-labelledby="cancel-title">
       <h2 id="cancel-title" className="font-display text-2xl text-ivory-50">
         {r.status === 'waitlisted' ? 'Leave the waitlist?' : 'Cancel this registration?'}
       </h2>

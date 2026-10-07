@@ -42,13 +42,13 @@ export default function ArticlePage() {
           <Container className="max-w-4xl text-center">
             <Reveal>
               <p className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[0.66rem] uppercase tracking-[0.26em] text-slate-400">
-                <Link to="/journal" className="hover:text-ivory-50">
+                <Link to="/journal" className="-my-3.5 py-3.5 hover:text-ivory-50">
                   Journal
                 </Link>
                 {b.category && (
                   <>
                     <span aria-hidden="true">·</span>
-                    <Link to={`/journal?category=${encodeURIComponent(b.category.slug)}`} className="text-champagne-400 hover:text-champagne-200">
+                    <Link to={`/journal?category=${encodeURIComponent(b.category.slug)}`} className="-my-3.5 py-3.5 text-champagne-400 hover:text-champagne-200">
                       {b.category.name}
                     </Link>
                   </>

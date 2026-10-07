@@ -130,7 +130,7 @@ export default function ServicePage() {
             </Reveal>
             <ol className="mt-16 grid gap-px border border-[var(--line)] bg-[var(--line)] md:grid-cols-2">
               {service.offerings.map((o, i) => (
-                <Reveal as="li" key={o.title} delay={0.06 * i} className="bg-midnight-950 p-8 md:p-12">
+                <Reveal as="li" key={o.title} delay={0.06 * i} className="bg-midnight-950 p-6 sm:p-8 md:p-12">
                   <span aria-hidden="true" className="font-display text-lg italic text-champagne-400">
                     {['I', 'II', 'III', 'IV', 'V', 'VI'][i] ?? i + 1}.
                   </span>

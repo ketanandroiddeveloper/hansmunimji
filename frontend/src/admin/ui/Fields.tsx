@@ -2,7 +2,7 @@ import { forwardRef, useId } from 'react'
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
 
 export const controlClass =
-  'block w-full border bg-midnight-950/70 px-3 py-2 text-sm font-light text-ivory-50 placeholder:text-slate-400/60 transition-colors focus:outline-none focus:ring-0 disabled:opacity-50'
+  'block w-full border bg-midnight-950/70 px-3 py-2.5 text-base font-light text-ivory-50 lg:py-2 lg:text-sm placeholder:text-slate-400/60 transition-colors focus:outline-none focus:ring-0 disabled:opacity-50'
 
 export function borderClass(error?: string): string {
   return error ? 'border-danger-300/70 focus:border-danger-300' : 'border-[var(--line-strong)] hover:border-ivory-50/30 focus:border-champagne-400'

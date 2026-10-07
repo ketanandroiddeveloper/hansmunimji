@@ -8,7 +8,7 @@ import { StepIndicator } from '../../components/form/StepIndicator'
 import { Seo } from '../../components/seo/Seo'
 import { Button, ButtonLink } from '../../components/ui/Button'
 import { Container } from '../../components/ui/Container'
-import { ConfidentialitySeal, OrnamentRule } from '../../components/ui/Ornaments'
+import { ConfidentialitySeal, Glow, OrnamentRule } from '../../components/ui/Ornaments'
 import { EASE } from '../../components/ui/Reveal'
 import { LoadingBlock } from '../../components/ui/States'
 import { captureAccessToken, storeToken } from '../../lib/accessTokens'
@@ -174,8 +174,8 @@ export default function ApplicationPage() {
   return (
     <>
       <Seo title="Request private access" description="A confidential application to begin working with the practice." noindex />
-      <section className="grain relative min-h-screen bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
-        <div aria-hidden="true" className="pointer-events-none absolute -left-[10%] top-0 h-[60vh] w-[50vw] rounded-full bg-emerald-700/15 blur-[140px]" />
+      <section className="grain relative min-h-svh bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
+        <Glow className="-left-[10%] top-0 h-[60vh] w-[50vw] bg-emerald-700/15 blur-[140px]" />
         <Container className="relative">
           <div className="grid gap-16 lg:grid-cols-12 lg:gap-10">
             <aside className="lg:col-span-4">
@@ -355,7 +355,7 @@ export default function ApplicationPage() {
                 <div className="mt-14 flex flex-wrap items-center justify-between gap-6 border-t border-[var(--line)] pt-8">
                   <div className="flex items-center gap-6">
                     {step > 0 && (
-                      <Button variant="ghost" size="sm" onClick={() => setStep((s) => s - 1)} className="!px-0">
+                      <Button variant="ghost" size="flush" onClick={() => setStep((s) => s - 1)}>
                         ← Back
                       </Button>
                     )}

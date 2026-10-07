@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { z } from 'zod'
 import { Checkbox, FormAlert, SelectInput, TextArea, TextInput } from '../../components/form/Fields'
 import { PrivacyNoticeLink } from '../../components/form/PrivacyNoticeLink'
@@ -83,9 +83,9 @@ export default function EventPage() {
             <nav aria-label="Breadcrumb" className="mb-10">
               <ol className="flex flex-wrap items-center gap-3 text-[0.66rem] uppercase tracking-[0.24em] text-slate-400">
                 <li>
-                  <ButtonLink to="/gatherings" variant="ghost" size="sm" className="!px-0 !py-0 !text-[0.66rem]">
+                  <Link to="/gatherings" className="-my-3.5 inline-flex py-3.5 font-medium text-ivory-200 transition-colors hover:text-champagne-200">
                     ← Gatherings
-                  </ButtonLink>
+                  </Link>
                 </li>
               </ol>
             </nav>
@@ -386,7 +386,7 @@ function RegistrationForm({ event: e }: { event: EventDetail }) {
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="border border-[var(--line-strong)] bg-midnight-950/60 p-8 md:p-10">
+    <div className="border border-[var(--line-strong)] bg-midnight-950/60 p-6 sm:p-8 md:p-10">
       <h2 className="font-display text-3xl text-ivory-50">{title}</h2>
       {children}
     </div>

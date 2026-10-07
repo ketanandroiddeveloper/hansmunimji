@@ -72,6 +72,9 @@ export function formatDuration(seconds: number | null | undefined): string {
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
+/** Stored slugs such as "guided_meditation" → "Guided meditation". */
+export const humanize = (slug: string): string => slug.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
+
 /** "48 hours" → "2 days"; keeps hours when not a whole number of days. */
 export function formatNoticePeriod(hours: number): string {
   if (hours >= 24 && hours % 24 === 0) return hours === 24 ? '24 hours' : `${hours / 24} days`

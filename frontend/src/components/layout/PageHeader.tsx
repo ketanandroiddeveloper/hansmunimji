@@ -34,7 +34,7 @@ export function PageHeader({
                 <li key={c.label} className="flex items-center gap-3">
                   {i > 0 && <span aria-hidden="true">/</span>}
                   {c.to ? (
-                    <Link to={c.to} className="transition-colors hover:text-ivory-50">
+                    <Link to={c.to} className="-my-3.5 py-3.5 transition-colors hover:text-ivory-50">
                       {c.label}
                     </Link>
                   ) : (

@@ -7,7 +7,7 @@ import { Picture } from '../../components/ui/Picture'
 import { Reveal } from '../../components/ui/Reveal'
 import { EmptyState, ErrorBlock, LoadingBlock } from '../../components/ui/States'
 import { storedClientAccess } from '../../lib/accessTokens'
-import { formatDuration } from '../../lib/format'
+import { formatDuration, humanize as label } from '../../lib/format'
 import { useAudio, useOptionalPage } from '../../lib/queries'
 import { breadcrumbLd } from '../../lib/structuredData'
 import type { AudioTrack } from '../../lib/types'
@@ -18,8 +18,6 @@ const DEFAULTS = {
   title: 'Recordings, for the quiet hours.',
   intro: 'Guided meditations and reflections, to be listened to in stillness. Some recordings are reserved for clients of the practice.',
 }
-
-const label = (category: string) => category.replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase())
 
 export default function LibraryPage() {
   const page = useOptionalPage('library')
@@ -70,7 +68,7 @@ export default function LibraryPage() {
                       type="button"
                       aria-pressed={category === c}
                       onClick={() => setCategory(c)}
-                      className={`border px-4 py-2 text-[0.66rem] uppercase tracking-[0.22em] transition-colors ${
+                      className={`border px-4 py-3 text-[0.66rem] lg:py-2 uppercase tracking-[0.22em] transition-colors ${
                         category === c ? 'border-champagne-400 text-champagne-200' : 'border-[var(--line-strong)] text-ivory-200/70 hover:text-ivory-50'
                       }`}
                     >
@@ -187,13 +185,13 @@ function TrackRow({
 
       {active && (playing || time.current > 0) && (
         <div className="flex flex-wrap items-center gap-6 pb-8 md:pl-[calc(3.5rem+5rem+4rem)]">
-          <button type="button" onClick={() => onSkip(-15)} aria-label="Back 15 seconds" className="text-[0.66rem] uppercase tracking-[0.2em] text-ivory-200/70 hover:text-champagne-200">
+          <button type="button" onClick={() => onSkip(-15)} aria-label="Back 15 seconds" className="-my-3 py-3 text-[0.66rem] uppercase tracking-[0.2em] text-ivory-200/70 hover:text-champagne-200">
             −15s
           </button>
           <div className="min-w-[12rem] flex-1">
             <Scrubber current={time.current} duration={time.duration || track.duration_seconds || 0} onSeek={onSeek} label={track.title} />
           </div>
-          <button type="button" onClick={() => onSkip(15)} aria-label="Forward 15 seconds" className="text-[0.66rem] uppercase tracking-[0.2em] text-ivory-200/70 hover:text-champagne-200">
+          <button type="button" onClick={() => onSkip(15)} aria-label="Forward 15 seconds" className="-my-3 py-3 text-[0.66rem] uppercase tracking-[0.2em] text-ivory-200/70 hover:text-champagne-200">
             +15s
           </button>
         </div>

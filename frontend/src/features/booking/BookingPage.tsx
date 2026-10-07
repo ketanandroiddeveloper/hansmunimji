@@ -12,7 +12,7 @@ import { StepIndicator } from '../../components/form/StepIndicator'
 import { Seo } from '../../components/seo/Seo'
 import { Button, ButtonLink } from '../../components/ui/Button'
 import { Container } from '../../components/ui/Container'
-import { ConfidentialitySeal } from '../../components/ui/Ornaments'
+import { ConfidentialitySeal, Glow } from '../../components/ui/Ornaments'
 import { EASE } from '../../components/ui/Reveal'
 import { EmptyState, ErrorBlock, LoadingBlock } from '../../components/ui/States'
 import { captureInviteToken, storeToken } from '../../lib/accessTokens'
@@ -140,8 +140,8 @@ export default function BookingPage() {
   return (
     <>
       <Seo title="Book a consultation" description="Choose a time for a private consultation." noindex={Boolean(inviteToken)} />
-      <section className="grain relative min-h-screen bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
-        <div aria-hidden="true" className="pointer-events-none absolute -right-[10%] top-0 h-[60vh] w-[50vw] rounded-full bg-emerald-700/15 blur-[140px]" />
+      <section className="grain relative min-h-svh bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
+        <Glow className="-right-[10%] top-0 h-[60vh] w-[50vw] bg-emerald-700/15 blur-[140px]" />
         <Container className="relative">
           <header className="max-w-3xl">
             <p className="eyebrow flex items-center gap-4">
@@ -213,7 +213,7 @@ export default function BookingPage() {
                         />
                         <div className="mt-14 flex flex-wrap items-center justify-between gap-6 border-t border-[var(--line)] pt-8">
                           {(types.data.length ?? 0) > 1 ? (
-                            <Button variant="ghost" size="sm" className="!px-0" onClick={() => setStep(0)}>
+                            <Button variant="ghost" size="flush" onClick={() => setStep(0)}>
                               ← Change session
                             </Button>
                           ) : (
@@ -455,7 +455,7 @@ function DetailsStep({
       {paymentUnavailable && <FormAlert tone="info">Online payment for this session is not available at present, so it cannot be booked online. Please contact the private office.</FormAlert>}
 
       <div className="flex flex-wrap items-center justify-between gap-6 border-t border-[var(--line)] pt-8">
-        <Button variant="ghost" size="sm" className="!px-0" onClick={onBack}>
+        <Button variant="ghost" size="flush" onClick={onBack}>
           ← Change time
         </Button>
         <Button type="submit" arrow loading={formState.isSubmitting} disabled={paymentUnavailable}>
@@ -497,7 +497,7 @@ function Summary({
       : null
 
   return (
-    <div className="border border-[var(--line)] bg-midnight-900/50 p-8">
+    <div className="border border-[var(--line)] bg-midnight-900/50 p-6 sm:p-8">
       <p className="eyebrow">Your session</p>
       {type ? (
         <>

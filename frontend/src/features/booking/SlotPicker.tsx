@@ -235,7 +235,7 @@ function MonthButton({ direction, disabled, onClick }: { direction: 'prev' | 'ne
       onClick={onClick}
       disabled={disabled}
       aria-label={direction === 'prev' ? 'Previous month' : 'Next month'}
-      className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--line-strong)] text-ivory-50 transition-colors hover:border-champagne-400 hover:text-champagne-200 disabled:cursor-not-allowed disabled:opacity-30"
+      className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--line-strong)] text-ivory-50 transition-colors hover:border-champagne-400 hover:text-champagne-200 disabled:cursor-not-allowed disabled:opacity-30"
     >
       <svg aria-hidden="true" viewBox="0 0 8 12" className={`h-3 w-2 ${direction === 'prev' ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" strokeWidth="1.2">
         <path d="M7 1 2 6l5 5" />

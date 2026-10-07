@@ -26,17 +26,17 @@ export function Dialog({ open, onClose, title, children, footer, wide }: { open:
       className={`m-auto w-[calc(100%-2rem)] ${wide ? 'max-w-3xl' : 'max-w-lg'} border border-[var(--line-strong)] bg-midnight-900 p-0 text-ivory-50 backdrop:bg-midnight-950/80 backdrop:backdrop-blur-sm`}
     >
       {open && (
-        <div className="flex max-h-[85vh] flex-col">
+        <div className="flex max-h-[85dvh] flex-col">
           <div className="flex items-center justify-between gap-4 border-b border-[var(--line)] px-6 py-4">
             <h2 className="font-display text-2xl">{title}</h2>
-            <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-ivory-50" aria-label="Close">
+            <button type="button" onClick={onClose} className="-m-4 p-4 text-slate-400 hover:text-ivory-50" aria-label="Close">
               <svg aria-hidden="true" viewBox="0 0 14 14" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4">
                 <path d="M1 1l12 12M13 1 1 13" />
               </svg>
             </button>
           </div>
           <div className="overflow-y-auto px-6 py-5">{children}</div>
-          {footer && <div className="flex justify-end gap-2 border-t border-[var(--line)] px-6 py-4">{footer}</div>}
+          {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--line)] px-6 py-4">{footer}</div>}
         </div>
       )}
     </dialog>,

@@ -53,7 +53,7 @@ export function ConsentBanner() {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 24 }}
           transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-          className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-2xl border border-[var(--line-strong)] bg-midnight-900/95 p-6 backdrop-blur-md md:p-8"
+          className="fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-50 max-h-[calc(100dvh-2rem)] overflow-y-auto mx-auto max-w-2xl border border-[var(--line-strong)] bg-midnight-900/95 p-6 backdrop-blur-md md:p-8"
         >
           <p id="consent-title" className="eyebrow">
             Your privacy

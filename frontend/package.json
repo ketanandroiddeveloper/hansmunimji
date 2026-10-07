@@ -9,6 +9,8 @@
     "prerender": "node scripts/prerender.mjs",
     "build:prerender": "npm run build && npm run prerender",
     "lint": "oxlint",
+    "test": "vitest run",
+    "audit:responsive": "node scripts/responsive-audit.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -42,6 +44,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^30.1.2",
     "oxlint": "^1.81.0",
+    "playwright-core": "^1.63.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",

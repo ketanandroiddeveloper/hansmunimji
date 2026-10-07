@@ -40,7 +40,7 @@ export default function GatheringsPage() {
                 type="button"
                 aria-pressed={when === w}
                 onClick={() => setWhen(w)}
-                className={`-mb-px border-b pb-4 text-[0.7rem] uppercase tracking-[0.24em] transition-colors ${when === w ? 'border-champagne-400 text-champagne-200' : 'border-transparent text-slate-400 hover:text-ivory-50'}`}
+                className={`-mb-px border-b pb-4 pt-3 text-[0.7rem] lg:pt-0 uppercase tracking-[0.24em] transition-colors ${when === w ? 'border-champagne-400 text-champagne-200' : 'border-transparent text-slate-400 hover:text-ivory-50'}`}
               >
                 {w === 'upcoming' ? 'Upcoming' : 'Past'}
               </button>

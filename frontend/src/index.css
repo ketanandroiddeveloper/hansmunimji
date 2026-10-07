@@ -22,6 +22,7 @@
     font-weight: 400;
     line-height: 1.7;
     min-height: 100dvh;
+    overflow-wrap: break-word;
   }
 
   ::selection {
@@ -73,6 +74,21 @@
   }
 }
 
+/* Page gutter; with viewport-fit=cover it must also clear the notch and rounded corners in landscape. */
+@utility gutter {
+  --gutter: 1.5rem;
+  padding-left: max(var(--gutter), env(safe-area-inset-left));
+  padding-right: max(var(--gutter), env(safe-area-inset-right));
+
+  @media (width >= 48rem) {
+    --gutter: 2.5rem;
+  }
+
+  @media (width >= 64rem) {
+    --gutter: 4rem;
+  }
+}
+
 @layer components {
   .eyebrow {
     @apply font-sans text-eyebrow font-medium uppercase text-champagne-400;
@@ -107,6 +123,8 @@
     font-size: var(--text-body-l);
     line-height: 1.75;
     font-weight: 300;
+    /* CMS bodies can contain long URLs or unbroken strings; `anywhere` also lets them shrink inside flex and grid items. */
+    overflow-wrap: anywhere;
   }
 
   .prose-quiet > * + * {

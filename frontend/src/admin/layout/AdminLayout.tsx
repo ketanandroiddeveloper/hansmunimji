@@ -106,7 +106,7 @@ export function AdminLayout() {
       <div className="min-w-0">
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-[var(--line)] bg-midnight-950/90 px-5 backdrop-blur md:px-8">
           <div className="flex items-center gap-4">
-            <button type="button" className="p-1 text-ivory-200 lg:hidden" aria-label="Open menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
+            <button type="button" className="-m-2.5 p-3.5 text-ivory-200 lg:hidden" aria-label="Open menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}>
               <svg aria-hidden="true" viewBox="0 0 20 14" className="h-3.5 w-5" fill="none" stroke="currentColor" strokeWidth="1.3">
                 <path d="M0 1h20M0 7h20M0 13h20" />
               </svg>
@@ -117,10 +117,10 @@ export function AdminLayout() {
             <a href="/" target="_blank" rel="noopener noreferrer" className="hidden text-slate-400 hover:text-champagne-200 sm:inline">
               View site ↗
             </a>
-            <NavLink to="/admin/account" className={({ isActive }) => (isActive ? 'text-champagne-200' : 'text-ivory-200 hover:text-champagne-200')}>
+            <NavLink to="/admin/account" className={({ isActive }) => `-my-3 py-3 ${isActive ? 'text-champagne-200' : 'text-ivory-200 hover:text-champagne-200'}`}>
               {user.name}
             </NavLink>
-            <button type="button" onClick={() => signOut()} className="uppercase tracking-[0.16em] text-slate-400 hover:text-champagne-200">
+            <button type="button" onClick={() => signOut()} className="-my-3 py-3 uppercase tracking-[0.16em] text-slate-400 hover:text-champagne-200">
               Sign out
             </button>
           </div>

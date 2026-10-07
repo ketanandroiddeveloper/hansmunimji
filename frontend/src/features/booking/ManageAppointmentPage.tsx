@@ -6,7 +6,7 @@ import { FormAlert, TextArea } from '../../components/form/Fields'
 import { Seo } from '../../components/seo/Seo'
 import { Button, ButtonLink } from '../../components/ui/Button'
 import { Container } from '../../components/ui/Container'
-import { ConfidentialitySeal } from '../../components/ui/Ornaments'
+import { ConfidentialitySeal, Glow } from '../../components/ui/Ornaments'
 import { ErrorBlock, LoadingBlock } from '../../components/ui/States'
 import { captureAccessToken } from '../../lib/accessTokens'
 import { api, ApiError } from '../../lib/api'
@@ -237,7 +237,7 @@ export default function ManageAppointmentPage() {
                 )}
               </>
             ) : (
-              <div className="border border-[var(--line)] bg-midnight-900/50 p-8">
+              <div className="border border-[var(--line)] bg-midnight-900/50 p-6 sm:p-8">
                 <p className="eyebrow">Private office</p>
                 <p className="mt-5 font-light leading-relaxed text-ivory-200/80">
                   {active
@@ -312,7 +312,7 @@ function ReschedulePanel({ appointment: a, token, onDone, onClose }: { appointme
         </div>
       )}
       <div className="mt-12 flex flex-wrap items-center justify-between gap-6 border-t border-[var(--line)] pt-8">
-        <Button variant="ghost" size="sm" className="!px-0" onClick={onClose}>
+        <Button variant="ghost" size="flush" onClick={onClose}>
           Keep current time
         </Button>
         <Button arrow disabled={!slot} loading={busy} onClick={confirm}>
@@ -363,7 +363,7 @@ function CancelPanel({ appointment: a, token, onDone, onClose }: { appointment: 
         </div>
       )}
       <div className="mt-10 flex flex-wrap items-center justify-between gap-6 border-t border-[var(--line)] pt-8">
-        <Button variant="ghost" size="sm" className="!px-0" onClick={onClose}>
+        <Button variant="ghost" size="flush" onClick={onClose}>
           Keep my booking
         </Button>
         <Button variant="outline" loading={busy} onClick={confirm}>
@@ -376,9 +376,9 @@ function CancelPanel({ appointment: a, token, onDone, onClose }: { appointment: 
 
 function Shell({ children }: { children: ReactNode }) {
   return (
-    <section className="grain relative min-h-screen bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
+    <section className="grain relative min-h-svh bg-midnight-950 pb-28 pt-[calc(var(--header-h)+4rem)]">
       <Seo title="Your consultation" noindex />
-      <div aria-hidden="true" className="pointer-events-none absolute -left-[10%] top-0 h-[60vh] w-[50vw] rounded-full bg-emerald-700/15 blur-[140px]" />
+      <Glow className="-left-[10%] top-0 h-[60vh] w-[50vw] bg-emerald-700/15 blur-[140px]" />
       <Container className="relative">{children}</Container>
     </section>
   )

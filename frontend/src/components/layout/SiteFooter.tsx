@@ -5,11 +5,14 @@ import { Container } from '../ui/Container'
 import { ConfidentialitySeal, OrnamentRule } from '../ui/Ornaments'
 import { NAV, Wordmark } from './SiteHeader'
 
+const FOOTER_LINK = 'link-underline inline-block py-3 transition-colors hover:text-ivory-50 lg:inline lg:py-0 lg:pb-0.5'
+const LEGAL_LINK = 'inline-block py-3.5 transition-colors hover:text-ivory-50 lg:inline lg:py-0'
+
 function FooterColumn({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
       <p className="eyebrow mb-6">{title}</p>
-      <ul className="space-y-3 text-sm font-light text-ivory-200/75">{children}</ul>
+      <ul className="text-sm font-light text-ivory-200/75 lg:space-y-3">{children}</ul>
     </div>
   )
 }
@@ -17,7 +20,7 @@ function FooterColumn({ title, children }: { title: string; children: ReactNode 
 function FooterLink({ to, children }: { to: string; children: ReactNode }) {
   return (
     <li>
-      <Link to={to} className="link-underline pb-0.5 transition-colors hover:text-ivory-50">
+      <Link to={to} className={FOOTER_LINK}>
         {children}
       </Link>
     </li>
@@ -68,21 +71,22 @@ export function SiteFooter() {
               <FooterLink to="/private-access">Request private access</FooterLink>
               {email && (
                 <li>
-                  <a href={`mailto:${email}`} className="link-underline pb-0.5 transition-colors hover:text-ivory-50">
-                    {email}
+                  <a href={`mailto:${email}`} aria-label={email} className={`${FOOTER_LINK} lg:whitespace-nowrap`}>
+                    {email.split('@')[0]}
+                    <span className="inline-block">@{email.split('@').slice(1).join('@')}</span>
                   </a>
                 </li>
               )}
               {phone && (
                 <li>
-                  <a href={`tel:${phone.replace(/\s+/g, '')}`} className="link-underline pb-0.5 transition-colors hover:text-ivory-50">
+                  <a href={`tel:${phone.replace(/\s+/g, '')}`} className={`${FOOTER_LINK} whitespace-nowrap`}>
                     {phone}
                   </a>
                 </li>
               )}
               {social.map((s) => (
                 <li key={s.url}>
-                  <a href={s.url} target="_blank" rel="noopener noreferrer" className="link-underline pb-0.5 transition-colors hover:text-ivory-50">
+                  <a href={s.url} target="_blank" rel="noopener noreferrer" className={FOOTER_LINK}>
                     {s.label}
                   </a>
                 </li>
@@ -95,16 +99,16 @@ export function SiteFooter() {
           <p>
             © {new Date().getFullYear()} {name}. All rights reserved.
           </p>
-          <ul className="flex flex-wrap gap-x-8 gap-y-3">
+          <ul className="flex flex-wrap gap-x-8 lg:gap-y-3">
             {legal.map((p) => (
               <li key={p.slug}>
-                <Link to={`/legal/${p.slug}`} className="transition-colors hover:text-ivory-50">
+                <Link to={`/legal/${p.slug}`} className={LEGAL_LINK}>
                   {p.title}
                 </Link>
               </li>
             ))}
             <li>
-              <Link to="/privacy/requests" className="transition-colors hover:text-ivory-50">
+              <Link to="/privacy/requests" className={LEGAL_LINK}>
                 Your data
               </Link>
             </li>

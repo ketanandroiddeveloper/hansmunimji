@@ -31,7 +31,7 @@ export function ConfidentialitySection({ section }: { section: NonNullable<HomeS
         {points.length > 0 && (
           <ul className={`mt-20 grid gap-px overflow-hidden border border-[var(--line)] bg-[var(--line)] ${COLUMNS[Math.min(points.length, 4)] ?? ''}`}>
             {points.map((point, i) => (
-              <Reveal as="li" key={point} delay={0.08 * i} className="bg-midnight-800 p-8 md:p-10">
+              <Reveal as="li" key={point} delay={0.08 * i} className="bg-midnight-800 p-6 sm:p-8 md:p-10">
                 <span aria-hidden="true" className="font-display text-lg italic text-champagne-400">
                   {['I', 'II', 'III', 'IV', 'V', 'VI'][i] ?? i + 1}.
                 </span>

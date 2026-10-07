@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { formatDuration } from '../../lib/format'
+import { formatDuration, humanize } from '../../lib/format'
 import type { AudioTrack, HomeSections } from '../../lib/types'
 import { ButtonLink } from '../../components/ui/Button'
 import { Container, Section } from '../../components/ui/Container'
@@ -48,7 +48,7 @@ export function AudioSection({ section, tracks }: { section: NonNullable<HomeSec
                       </span>
                       <span className="flex-1">
                         <span className="block font-display text-2xl text-ivory-50 transition-colors group-hover:text-champagne-200">{track.title}</span>
-                        {track.category && <span className="mt-1 block text-[0.66rem] uppercase tracking-[0.24em] text-slate-400">{track.category}</span>}
+                        {track.category && <span className="mt-1 block text-[0.66rem] uppercase tracking-[0.24em] text-slate-400">{humanize(track.category)}</span>}
                       </span>
                       <span className="text-xs tabular-nums text-slate-400">
                         {track.access === 'clients' ? 'Clients' : formatDuration(track.duration_seconds)}

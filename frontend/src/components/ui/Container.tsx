@@ -9,7 +9,7 @@ type ContainerProps<T extends ElementType> = {
 export function Container<T extends ElementType = 'div'>({ as, children, className = '', ...rest }: ContainerProps<T>) {
   const Tag = (as ?? 'div') as ElementType
   return (
-    <Tag className={`mx-auto w-full max-w-site px-6 md:px-10 lg:px-16 ${className}`} {...rest}>
+    <Tag className={`mx-auto w-full max-w-site gutter ${className}`} {...rest}>
       {children}
     </Tag>
   )

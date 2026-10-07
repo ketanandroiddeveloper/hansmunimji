@@ -82,7 +82,7 @@ export function PaymentPanel({
   }
 
   return (
-    <div className="border border-[var(--line-strong)] bg-midnight-900/60 p-8 md:p-10">
+    <div className="border border-[var(--line-strong)] bg-midnight-900/60 p-6 sm:p-8 md:p-10">
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <p className="eyebrow">Secure payment</p>
         {remaining !== null && (
