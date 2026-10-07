@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
+use App\Controllers\Admin\IntegrationsController;
 use App\Core\Config;
+use App\Core\Request;
 use App\Integrations\Email\GmailApiMailer;
 use App\Integrations\Google\GoogleAccount;
 use App\Integrations\Google\GoogleApiError;
 use App\Integrations\Google\GoogleCalendarClient;
+use App\Security\SignedUrl;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Handler\MockHandler;
@@ -181,6 +184,110 @@ final class GoogleIntegrationTest extends IntegrationTestCase
         self::assertSame('1', $body['extendedProperties']['private']['pa_integration_test']);
         self::assertSame('DELETE', $this->sent[2]['request']->getMethod());
         self::assertStringContainsString('sendUpdates=none', (string) $this->sent[2]['request']->getUri());
+    }
+
+    public function testAuthorizationReturnsInTheFragment(): void
+    {
+        parse_str((string) parse_url($this->svc(GoogleAccount::class)->authorizationUrl('s'), PHP_URL_QUERY), $params);
+
+        self::assertSame('fragment', $params['response_mode']);
+        self::assertSame('code', $params['response_type']);
+    }
+
+    public function testCallbackWithoutQueryServesARelayPageAllowedOnlyItsOwnScript(): void
+    {
+        $response = $this->svc(IntegrationsController::class)->googleCallback($this->callbackRequest('GET'));
+
+        self::assertSame(200, $response->status());
+        self::assertStringStartsWith('text/html', $response->headers()['Content-Type']);
+        self::assertSame('no-referrer', $response->headers()['Referrer-Policy']);
+        self::assertSame(1, preg_match('#<script>(.*)</script>#s', $response->body(), $script));
+        $hash = base64_encode(hash('sha256', $script[1], true));
+        self::assertStringContainsString("script-src 'sha256-{$hash}'", $response->headers()['Content-Security-Policy']);
+        self::assertStringContainsString("connect-src 'self'", $response->headers()['Content-Security-Policy']);
+    }
+
+    public function testRelayedCodeIsExchangedWithTheRegisteredRedirectUri(): void
+    {
+        $state = $this->oauthState();
+        $this->google->append($this->tokenResponse('owner@example.test'));
+
+        $response = $this->svc(IntegrationsController::class)->googleCallbackRelay(
+            $this->callbackRequest('POST', ['code' => 'fake-code', 'state' => $state, 'error' => '']),
+        );
+
+        self::assertSame(200, $response->status());
+        self::assertStringEndsWith('/settings/integrations/google?google=connected', json_decode($response->body(), true)['data']['redirect']);
+        self::assertSame('connected', $this->row('calendar_integrations', "provider = 'google'")['status']);
+        parse_str((string) $this->sent[0]['request']->getBody(), $exchange);
+        self::assertSame('fake-code', $exchange['code']);
+        self::assertSame('http://127.0.0.1/api/v1/admin/integrations/google/callback', $exchange['redirect_uri']);
+    }
+
+    public function testRelayRejectsAForgedStateWithoutCallingGoogle(): void
+    {
+        $this->oauthState();
+        $forged = $this->c->get(SignedUrl::class)->sign(['purpose' => 'audio'], 600);
+
+        foreach (['', 'not-a-token', $forged] as $state) {
+            $response = $this->svc(IntegrationsController::class)->googleCallbackRelay(
+                $this->callbackRequest('POST', ['code' => 'fake-code', 'state' => $state]),
+            );
+            self::assertStringEndsWith('?google=invalid_state', json_decode($response->body(), true)['data']['redirect']);
+        }
+        self::assertSame([], $this->sent);
+    }
+
+    public function testRelayedConsentRefusalIsReportedAsDenied(): void
+    {
+        $response = $this->svc(IntegrationsController::class)->googleCallbackRelay(
+            $this->callbackRequest('POST', ['state' => $this->oauthState(), 'error' => 'access_denied']),
+        );
+
+        self::assertStringEndsWith('?google=denied', json_decode($response->body(), true)['data']['redirect']);
+        self::assertSame([], $this->sent);
+    }
+
+    public function testQueryStringReturnIsStillAccepted(): void
+    {
+        $this->google->append($this->tokenResponse('owner@example.test'));
+
+        $response = $this->svc(IntegrationsController::class)->googleCallback(
+            $this->callbackRequest('GET', [], ['code' => 'fake-code', 'state' => $this->oauthState(), 'iss' => 'https://accounts.google.com']),
+        );
+
+        self::assertSame(302, $response->status());
+        self::assertStringEndsWith('?google=connected', $response->headers()['Location']);
+    }
+
+    /** A signed state for a fresh super-admin with a live session, as googleConnect issues it. */
+    private function oauthState(): string
+    {
+        $user = $this->adminUser();
+        $role = $this->db->insert('roles', ['slug' => 'super-admin', 'name' => 'Super admin', 'is_system' => 1]);
+        $this->db->insert('user_roles', ['user_id' => $user, 'role_id' => $role]);
+        $now = $this->clock->nowString();
+        $session = $this->db->insert('user_sessions', [
+            'user_id' => $user, 'token_hash' => hash('sha256', random_bytes(8)), 'csrf_hash' => hash('sha256', random_bytes(8)),
+            'created_at' => $now, 'last_seen_at' => $now, 'expires_at' => $this->clock->now()->modify('+1 hour')->format('Y-m-d H:i:s'),
+        ]);
+
+        return $this->c->get(SignedUrl::class)->sign([
+            'purpose' => 'google_oauth', 'uid' => $user, 'sid' => $session,
+            'env' => $this->c->get(Config::class)->environment(), 'nonce' => 'n',
+        ], 600);
+    }
+
+    /** @param array<string, string> $body @param array<string, string> $query */
+    private function callbackRequest(string $method, array $body = [], array $query = []): Request
+    {
+        return new Request(
+            $method,
+            '/api/v1/admin/integrations/google/callback',
+            $query,
+            $body === [] ? [] : ['content-type' => 'application/json'],
+            $body === [] ? '' : json_encode($body),
+        );
     }
 
     private function connect(): void

@@ -96,6 +96,7 @@ return static function (Router $router): void {
 
         // Google redirects here cross-site, so the session cookie is absent; the signed state authenticates.
         $r->get('/admin/integrations/google/callback', [Admin\IntegrationsController::class, 'googleCallback'], ['throttle:oauth_callback,20,600']);
+        $r->post('/admin/integrations/google/callback', [Admin\IntegrationsController::class, 'googleCallbackRelay'], ['throttle:oauth_callback,20,600']);
 
         // ------------------------------------------------------------ admin
         $r->group('/admin', ['auth', 'two_factor', 'csrf'], static function (Router $r): void {

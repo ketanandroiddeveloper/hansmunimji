@@ -99,12 +99,73 @@ final class IntegrationsController extends Controller
         return $this->ok(['authorization_url' => $this->google->authorizationUrl($state)]);
     }
 
+    /**
+     * Google returns in the URL fragment (see GoogleAccount::authorizationUrl), which the browser never
+     * sends, so this serves a page that posts code and state back. A query-string return is still accepted.
+     */
     public function googleCallback(Request $request): Response
     {
-        $adminUrl = rtrim((string) $this->config->get('app.admin_url'), '/') . '/settings/integrations/google';
-        $claims = $this->signer->verify((string) $request->query('state', ''));
+        if ($request->query('code') === null && $request->query('error') === null) {
+            return $this->googleRelayPage();
+        }
+        $outcome = $this->completeGoogleConnect(
+            $request,
+            (string) $request->query('state', ''),
+            (string) $request->query('code', ''),
+            (string) $request->query('error', ''),
+        );
+
+        return Response::redirect($this->googleAdminUrl($outcome));
+    }
+
+    public function googleCallbackRelay(Request $request): Response
+    {
+        $field = static fn (string $key): string => is_string($request->input($key)) ? $request->input($key) : '';
+        $outcome = $this->completeGoogleConnect($request, $field('state'), $field('code'), $field('error'));
+
+        return $this->ok(['redirect' => $this->googleAdminUrl($outcome)]);
+    }
+
+    private function googleAdminUrl(string $outcome): string
+    {
+        return rtrim((string) $this->config->get('app.admin_url'), '/') . '/settings/integrations/google?google=' . $outcome;
+    }
+
+    private function googleRelayPage(): Response
+    {
+        $failed = json_encode($this->googleAdminUrl('failed'), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);
+        $script = <<<JS
+            (function () {
+              var p = new URLSearchParams(location.hash.slice(1));
+              history.replaceState(null, '', location.pathname);
+              fetch(location.pathname, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: p.get('code') || '', state: p.get('state') || '', error: p.get('error') || '' })
+              })
+                .then(function (r) { return r.json(); })
+                .then(function (b) { location.replace(b.data.redirect); })
+                .catch(function () { location.replace({$failed}); });
+            })();
+            JS;
+        $hash = base64_encode(hash('sha256', $script, true));
+        $html = "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"robots\" content=\"noindex\"><title>Connecting Google</title></head>"
+            . "<body><p>Connecting your Google account…</p><noscript><p>JavaScript is required to finish connecting Google.</p></noscript>"
+            . "<script>{$script}</script></body></html>";
+
+        return new Response($html, 200, [
+            'Content-Type' => 'text/html; charset=utf-8',
+            'Content-Security-Policy' => "default-src 'none'; script-src 'sha256-{$hash}'; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'",
+            'Referrer-Policy' => 'no-referrer',
+        ]);
+    }
+
+    /** @return string the outcome reported to the admin page as ?google=… */
+    private function completeGoogleConnect(Request $request, string $state, string $code, string $error): string
+    {
+        $claims = $this->signer->verify($state);
         if ($claims === null || ($claims['purpose'] ?? null) !== 'google_oauth' || ($claims['env'] ?? null) !== $this->config->environment()) {
-            return Response::redirect($adminUrl . '?google=invalid_state');
+            return 'invalid_state';
         }
         $session = $this->db->first(
             "SELECT s.id FROM user_sessions s JOIN users u ON u.id = s.user_id
@@ -118,25 +179,25 @@ final class IntegrationsController extends Controller
             [(int) $claims['uid']],
         );
         if (!$allowed) {
-            return Response::redirect($adminUrl . '?google=unauthorized');
+            return 'unauthorized';
         }
-        if ($request->query('error')) {
+        if ($error !== '') {
             // access_denied: the user cancelled, or (while the app is in Testing) is not a listed test user.
             $this->integrationLog->record('google', 'oauth.consent', false, null, 'access_denied');
 
-            return Response::redirect($adminUrl . '?google=denied');
+            return 'denied';
         }
         try {
-            $result = $this->google->connect((string) $request->query('code', ''), (int) $claims['uid']);
+            $result = $this->google->connect($code, (int) $claims['uid']);
         } catch (GoogleApiError $e) {
             $this->logger->error('google_connect_failed', ['error_code' => $e->category, 'status' => $e->httpStatus]);
             $known = ['invalid_client', 'redirect_uri_mismatch', 'invalid_code', 'no_refresh_token', 'wrong_account', 'network'];
 
-            return Response::redirect($adminUrl . '?google=' . (in_array($e->category, $known, true) ? $e->category : 'failed'));
+            return in_array($e->category, $known, true) ? $e->category : 'failed';
         } catch (\Throwable $e) {
             $this->logger->error('google_connect_failed', ['type' => $e::class]);
 
-            return Response::redirect($adminUrl . '?google=failed');
+            return 'failed';
         }
         $this->audit->record((int) $claims['uid'], 'integration.google_connected', 'calendar_integration', null, ['account' => $result['email'], 'missing_scopes' => $result['missing_scopes']], $request);
 
@@ -146,7 +207,7 @@ final class IntegrationsController extends Controller
             $this->jobs->push('calendar.sync', ['appointment_id' => (int) $row['id']], 'calendar.sync:' . $row['id']);
         }
 
-        return Response::redirect($adminUrl . '?google=' . ($result['missing_scopes'] === [] ? 'connected' : 'partial'));
+        return $result['missing_scopes'] === [] ? 'connected' : 'partial';
     }
 
     public function googleDisconnect(Request $request): Response

@@ -100,6 +100,10 @@ final class GoogleAccount
             'client_id' => $this->config->get('google.client_id'),
             'redirect_uri' => $this->config->get('google.redirect_uri'),
             'response_type' => 'code',
+            // Google appends iss=https://accounts.google.com and full scope URLs to the return, and shared-host
+            // firewalls (ModSecurity) reject query values starting with https://. In the fragment they never
+            // reach the server; the callback page relays only code and state.
+            'response_mode' => 'fragment',
             'scope' => implode(' ', (array) $this->config->get('google.scopes')),
             'access_type' => 'offline',
             'prompt' => 'consent',
