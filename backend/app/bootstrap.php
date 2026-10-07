@@ -10,6 +10,7 @@ use App\Core\Env;
 use App\Core\EnvironmentGuard;
 use App\Core\Logger;
 use App\Core\Router;
+use App\Integrations\Email\GmailApiMailer;
 use App\Integrations\Email\LogMailer;
 use App\Integrations\Email\Mailer;
 use App\Integrations\Email\SmtpMailer;
@@ -78,9 +79,11 @@ $container->set(HttpClient::class, static fn () => new HttpClient([
 ]));
 $container->set(ClientInterface::class, static fn (Container $c) => $c->get(HttpClient::class));
 
-$container->set(Mailer::class, static fn (Container $c) => $config->get('mail.driver') === 'smtp'
-    ? new SmtpMailer($config->get('mail'))
-    : new LogMailer($c->get(Logger::class)));
+$container->set(Mailer::class, static fn (Container $c) => match ($config->get('mail.driver')) {
+    'smtp' => new SmtpMailer($config->get('mail')),
+    'gmail' => $c->get(GmailApiMailer::class),
+    default => new LogMailer($c->get(Logger::class)),
+});
 
 $container->set(GatewayRegistry::class, static fn (Container $c) => new GatewayRegistry([
     'razorpay' => new RazorpayGateway($c->get(HttpClient::class), $config->get('payments.razorpay')),

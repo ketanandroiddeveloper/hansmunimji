@@ -11,6 +11,7 @@ node_modules/
 backend/vendor/
 
 # Build output
+build/
 frontend/dist/
 frontend/dist-ssr/
 frontend/coverage/
@@ -30,3 +31,4 @@ backend/storage/cache/*
 *.log
 .idea/
 .vscode/
+backend/.phpunit.result.cache

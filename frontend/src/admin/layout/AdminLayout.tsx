@@ -47,6 +47,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
 
 function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { can } = useSession()
+  const { pathname } = useLocation()
   return (
     <nav aria-label="Admin" className="flex-1 overflow-y-auto px-3 pb-8">
       {NAV.map(({ group, items }) => {
@@ -60,10 +61,10 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
                 <li key={i.to}>
                   <NavLink
                     to={i.to}
-                    end={i.to === '/admin'}
+                    end={i.to === '/admin' || i.to === '/admin/settings'}
                     onClick={onNavigate}
                     className={({ isActive }) =>
-                      `block border-l px-3 py-1.5 text-[0.82rem] font-light transition-colors ${isActive ? 'border-champagne-400 bg-champagne-400/[0.06] text-champagne-200' : 'border-transparent text-ivory-200/80 hover:text-ivory-50'}`
+                      `block border-l px-3 py-1.5 text-[0.82rem] font-light transition-colors ${isActive || (i.to === '/admin/integrations' && pathname.startsWith('/admin/settings/integrations')) ? 'border-champagne-400 bg-champagne-400/[0.06] text-champagne-200' : 'border-transparent text-ivory-200/80 hover:text-ivory-50'}`
                     }
                   >
                     {i.label}

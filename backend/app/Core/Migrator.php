@@ -41,6 +41,15 @@ final class Migrator
         return $ran;
     }
 
+    /** @return list<string> migrations not yet applied, in the order migrate() would run them */
+    public function pending(): array
+    {
+        $this->ensureTable();
+        $applied = array_column($this->db->all('SELECT name FROM migrations'), 'name');
+
+        return array_values(array_diff(array_keys($this->files()), $applied));
+    }
+
     /** @return list<string> rolled back migration names */
     public function rollback(?callable $output = null): array
     {

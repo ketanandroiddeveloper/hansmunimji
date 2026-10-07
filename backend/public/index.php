@@ -6,6 +6,10 @@ use App\Core\Kernel;
 use App\Core\Request;
 use App\Core\Response;
 
+// Warnings and deprecations go to the error log, never into a JSON response (some hosts enable display_errors).
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
 // Local development only: let `php -S` serve public media from storage/public.
 if (PHP_SAPI === 'cli-server') {
     $path = parse_url((string) $_SERVER['REQUEST_URI'], PHP_URL_PATH) ?: '/';

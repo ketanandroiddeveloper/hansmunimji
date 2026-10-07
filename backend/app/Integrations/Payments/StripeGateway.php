@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Integrations\Payments;
 
 use Stripe\Checkout\Session;
-use Stripe\Exception\ApiErrorException;
+use Stripe\Exception\ExceptionInterface as StripeException;
 use Stripe\Exception\SignatureVerificationException;
+use Stripe\Stripe;
 use Stripe\StripeClient;
 use Stripe\Webhook;
 
@@ -64,7 +65,7 @@ final class StripeGateway implements PaymentGateway
                 'cancel_url' => $intent->cancelUrl,
                 'expires_at' => time() + 60 * (int) ($this->config['checkout_expiry_minutes'] ?? 31),
             ], ['idempotency_key' => $intent->idempotencyKey]);
-        } catch (ApiErrorException $e) {
+        } catch (StripeException $e) {
             throw new GatewayError('Stripe error: ' . $e->getMessage(), 0, $e);
         }
 
@@ -140,7 +141,7 @@ final class StripeGateway implements PaymentGateway
         try {
             /** @var Session $session */
             $session = $this->client()->checkout->sessions->retrieve($orderId, []);
-        } catch (ApiErrorException $e) {
+        } catch (StripeException $e) {
             throw new GatewayError('Stripe error: ' . $e->getMessage(), 0, $e);
         }
 
@@ -168,7 +169,7 @@ final class StripeGateway implements PaymentGateway
                 'reason' => 'requested_by_customer',
                 'metadata' => ['note' => mb_substr($reason, 0, 200)],
             ], ['idempotency_key' => $idempotencyKey]);
-        } catch (ApiErrorException $e) {
+        } catch (StripeException $e) {
             throw new GatewayError('Stripe error: ' . $e->getMessage(), 0, $e);
         }
 
@@ -180,7 +181,7 @@ final class StripeGateway implements PaymentGateway
         $warnings = [];
         try {
             $account = $this->client()->accounts->retrieve();
-        } catch (ApiErrorException | GatewayError $e) {
+        } catch (StripeException | GatewayError $e) {
             return ['ok' => false, 'mode' => $this->isLiveMode() ? 'live' : 'test', 'details' => ['error' => $e->getMessage()], 'warnings' => []];
         }
         if (!$account->charges_enabled) {
@@ -212,6 +213,8 @@ final class StripeGateway implements PaymentGateway
             throw new GatewayError('Stripe is not configured.');
         }
 
-        return $this->client ??= new StripeClient(['api_key' => $this->config['secret_key'], 'max_network_retries' => 2]);
+        Stripe::setMaxNetworkRetries(2);
+
+        return $this->client ??= new StripeClient(['api_key' => $this->config['secret_key']]);
     }
 }

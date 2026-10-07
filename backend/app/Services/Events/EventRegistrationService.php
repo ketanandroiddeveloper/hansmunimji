@@ -192,18 +192,23 @@ final class EventRegistrationService
         $id = (int) $result['id'];
         if ($result['status'] === 'confirmed') {
             $this->afterConfirmed($id, $token);
-        } else {
-            if ($result['status'] === 'pending_payment') {
-                $this->notifications->queue('event_payment_request', (string) $data['email'], $this->emailVars($this->findById($id), $token), 'event_registration', $id);
-            } elseif ($result['status'] === 'waitlisted') {
-                $this->notifications->queue('event_waitlisted', (string) $data['email'], $this->emailVars($this->findById($id), $token), 'event_registration', $id);
-            }
-            $this->notifications->queueAdmin('admin_new_booking', [
-                'reference' => $reference,
-                'type_title' => 'Registration: ' . $result['event']['title'],
-                'starts_at_local' => TimeFormatter::forClient((string) $result['event']['starts_at'], (string) $result['event']['timezone']),
-            ], 'event_registration', $id);
+        } elseif ($result['status'] === 'pending_payment') {
+            $this->notifications->queue('event_payment_request', (string) $data['email'], $this->emailVars($this->findById($id), $token), 'event_registration', $id);
+        } elseif ($result['status'] === 'waitlisted') {
+            $this->notifications->queue('event_waitlisted', (string) $data['email'], $this->emailVars($this->findById($id), $token), 'event_registration', $id);
         }
+        $this->notifications->queueAdmin('admin_new_event_registration', [
+            'reference' => $reference,
+            'event_title' => (string) $result['event']['title'],
+            'starts_at_local' => TimeFormatter::forClient((string) $result['event']['starts_at'], (string) $result['event']['timezone']),
+            'status' => match ($result['status']) {
+                'confirmed' => 'Confirmed',
+                'pending_payment' => 'Awaiting payment',
+                'waitlisted' => 'Waitlisted',
+                default => 'Awaiting review',
+            },
+            'seats' => $seats,
+        ], 'event_registration', $id);
 
         return [
             'reference' => $reference,

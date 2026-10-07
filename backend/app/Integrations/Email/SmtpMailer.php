@@ -24,26 +24,36 @@ final class SmtpMailer implements Mailer
     {
         $mail = new PHPMailer(true);
         try {
-            $mail->isSMTP();
-            $mail->Host = (string) $this->config['host'];
-            $mail->Port = (int) $this->config['port'];
-            $mail->SMTPAuth = $this->config['username'] !== '';
-            $mail->Username = (string) $this->config['username'];
-            $mail->Password = (string) $this->config['password'];
-            $mail->SMTPSecure = $this->config['encryption'] === 'ssl' ? PHPMailer::ENCRYPTION_SMTPS : PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->CharSet = 'UTF-8';
-            $mail->Timeout = 15;
-            $mail->setFrom((string) $this->config['from_address'], (string) $this->config['from_name']);
-            $mail->addAddress($to);
-            $mail->Subject = $subject;
-            $mail->isHTML(true);
-            $mail->Body = $html;
-            $mail->AltBody = $text;
+            $this->compose($mail, $to, $subject, $html, $text);
             $mail->send();
 
             return $mail->getLastMessageID() ?: null;
         } catch (MailerException $e) {
             throw new \RuntimeException('SMTP delivery failed: ' . $mail->ErrorInfo, 0, $e);
         }
+    }
+
+    /** @throws MailerException */
+    public function compose(PHPMailer $mail, string $to, string $subject, string $html, string $text): void
+    {
+        $mail->isSMTP();
+        $mail->Host = (string) $this->config['host'];
+        $mail->Port = (int) $this->config['port'];
+        $mail->SMTPAuth = $this->config['username'] !== '';
+        $mail->Username = (string) $this->config['username'];
+        $mail->Password = (string) $this->config['password'];
+        $mail->SMTPSecure = $this->config['encryption'] === 'ssl' ? PHPMailer::ENCRYPTION_SMTPS : PHPMailer::ENCRYPTION_STARTTLS;
+        $mail->CharSet = 'UTF-8';
+        $mail->Timeout = 15;
+        $mail->setFrom((string) $this->config['from_address'], (string) $this->config['from_name']);
+        $replyTo = (string) ($this->config['reply_to'] ?? '');
+        if ($replyTo !== '' && strcasecmp($replyTo, (string) $this->config['from_address']) !== 0) {
+            $mail->addReplyTo($replyTo, (string) $this->config['from_name']);
+        }
+        $mail->addAddress($to);
+        $mail->Subject = $subject;
+        $mail->isHTML(true);
+        $mail->Body = $html;
+        $mail->AltBody = $text;
     }
 }

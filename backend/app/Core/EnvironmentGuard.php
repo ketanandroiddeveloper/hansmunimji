@@ -49,8 +49,11 @@ final class EnvironmentGuard
             if (!str_starts_with((string) $config->get('app.frontend_url'), 'https://')) {
                 $problems[] = 'FRONTEND_URL must use HTTPS in production.';
             }
-            if ($config->get('mail.driver') !== 'smtp') {
-                $problems[] = 'MAIL_DRIVER must be smtp in production (the log driver writes messages to disk).';
+            if (!in_array($config->get('mail.driver'), ['smtp', 'gmail'], true)) {
+                $problems[] = 'MAIL_DRIVER must be smtp or gmail in production (the log driver writes messages to disk).';
+            }
+            if ((string) $config->get('google.redirect_uri') !== '' && !str_starts_with((string) $config->get('google.redirect_uri'), 'https://')) {
+                $problems[] = 'GOOGLE_REDIRECT_URI must use HTTPS in production.';
             }
         }
 

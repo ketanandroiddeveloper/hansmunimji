@@ -78,7 +78,8 @@ final class NotificationService
                 [$this->clock->nowString()],
             );
             foreach ($rows as $row) {
-                $this->db->update('notifications', ['status' => 'sending'], ['id' => $row['id']]);
+                // available_at doubles as the claim time, so releaseStale() can tell how long it has been sending.
+                $this->db->update('notifications', ['status' => 'sending', 'available_at' => $this->clock->nowString()], ['id' => $row['id']]);
             }
 
             return $rows;
@@ -89,6 +90,18 @@ final class NotificationService
         }
 
         return count($rows);
+    }
+
+    /**
+     * Re-queues messages whose worker died mid-delivery (shared hosts kill long-running processes).
+     * Delivery is at-least-once: a message that was sent but not yet marked may be sent again.
+     */
+    public function releaseStale(int $minutes = 15): int
+    {
+        return $this->db->run(
+            "UPDATE notifications SET status = 'queued' WHERE status = 'sending' AND available_at < ?",
+            [$this->clock->now()->modify("-{$minutes} minutes")->format('Y-m-d H:i:s')],
+        )->rowCount();
     }
 
     /** @param array<string, mixed> $row */

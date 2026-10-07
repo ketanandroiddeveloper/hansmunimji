@@ -13,5 +13,7 @@ return [
     'encryption' => Env::string('MAIL_ENCRYPTION', 'tls'),
     'from_address' => Env::string('MAIL_FROM_ADDRESS', 'concierge@example.com'),
     'from_name' => Env::string('MAIL_FROM_NAME', 'Private Office'),
+    // Where client replies go when the From address is an unattended sender (SMTP only; Gmail replies reach the connected account).
+    'reply_to' => Env::string('MAIL_REPLY_TO'),
     'admin_address' => Env::string('MAIL_ADMIN_ADDRESS'),
 ];

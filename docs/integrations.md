@@ -1,8 +1,10 @@
-# Integrations — Payments, Google Calendar/Meet, Email
+# Integrations — Payments, Google Workspace (Gmail, Calendar, Meet), Email
 
 All integrations are real implementations against the vendors' documented REST APIs. They activate when credentials are provided; without credentials the admin "Integrations" screen shows them as **Not configured** and dependent features degrade safely (paid appointment types and paid gatherings cannot be reserved, and the public pages say so).
 
-> **Status:** the Razorpay and Stripe adapters have been exercised only by the automated test suite (against a test-only fake gateway) and by local runs without credentials. They have **not** yet been run against a Razorpay or Stripe sandbox. Treat payments as unverified until the checklist in [Go-live prerequisites](#go-live-prerequisites) is complete on staging.
+> **Status (production at www.hansterahiansh.com):** **Razorpay is the only active gateway.** Stripe is disabled because no Stripe account is available for India; leave every `STRIPE_*` variable empty. The Stripe adapter stays in the code: one sandbox payment (USD) was captured through its webhook locally and confirmed the booking.
+>
+> **Live since 7 Oct 2026:** live keys and the live webhook are configured on production (`PAYMENTS_ENABLED=true`, INR only). `payments:check` passes in live mode; a webhook signed with the server's secret is accepted and a forged one rejected. Not yet confirmed: a webhook delivered by Razorpay itself (proves the dashboard secret matches) and a completed payment. Both are covered by the first real payment, which needs the owner's approval. A Razorpay test-mode payment was never completed locally.
 
 ## 1. Payments
 
@@ -29,7 +31,8 @@ Adding a gateway means implementing `PaymentGateway`, registering it in `Gateway
 
 * Supported currencies: **INR, USD, AED, GBP**. Prices are stored per currency in integer minor units (`appointment_type_prices`, `event_prices`). There is no currency conversion anywhere: a client pays exactly the stored price in the currency they choose.
 * A gateway is offered for a currency only when it is configured **and** the currency is listed in `RAZORPAY_CURRENCIES` / `STRIPE_CURRENCIES`. Set these to what each merchant account is actually enabled for. Non-INR on Razorpay requires International Payments to be activated on the account; Stripe presentment currencies depend on the account's country and settings.
-* `payments.routing` (admin → Settings → Payments) is an ordered list of allowed gateways per currency. Default: INR → Razorpay then Stripe; USD/AED/GBP → Stripe then Razorpay.
+* `payments.routing` (admin → Settings → Payments) is an ordered list of allowed gateways per currency. A freshly seeded database routes every currency to Razorpay only. Without a stored setting, the code falls back to INR → Razorpay then Stripe, and USD/AED/GBP → Stripe then Razorpay.
+* The booking and registration pages hide any currency that has no available gateway. Until Razorpay International Payments is approved and `RAZORPAY_CURRENCIES` lists them, USD, AED and GBP are not offered.
 * `payments.country_routing` (same screen) optionally moves a gateway to the front for clients from a given country, e.g. `AE → stripe`. It can only reorder gateways already allowed for the currency.
 * The booking forms ask for an optional country; the gateways endpoint returns gateways in routing order, and the client picks one.
 
@@ -80,7 +83,9 @@ Payments store the gateway name, order/payment/refund identifiers, amount, curre
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` (test-mode endpoint) | `whsec_…` (live endpoint) |
 | `STRIPE_CURRENCIES` | e.g. `USD,AED,GBP` | same |
 
-A gateway counts as configured only when its credentials **and** webhook secret are set (Razorpay: key ID, key secret, webhook secret; Stripe: secret key and webhook secret, plus the publishable key for the client). The boot guard (`app/Core/EnvironmentGuard.php`) refuses to start production with test keys, or any other environment with live keys. These values belong in `.env.staging` / `.env.production` outside the web root or in the platform's secret manager. They are never stored in admin settings, which reject secret-like keys, and never sent to the frontend; only the Razorpay key ID and Stripe publishable key are public.
+A gateway counts as configured only when its credentials **and** webhook secret are set (Razorpay: key ID, key secret, webhook secret; Stripe: secret key and webhook secret). Stripe Checkout is a full-page redirect, so the browser never needs a Stripe key; `STRIPE_PUBLISHABLE_KEY` is optional and only lets `payments:check` warn when it is from a different mode than the secret key. The boot guard (`app/Core/EnvironmentGuard.php`) refuses to start production with test keys, or any other environment with live keys. These values belong in `.env.staging` / `.env.production` outside the web root or in the platform's secret manager. They are never stored in admin settings, which reject secret-like keys, and never sent to the frontend; only the Razorpay key ID is public.
+
+A Stripe restricted key (`rk_test_…` / `rk_live_…`) may replace the secret key. It needs write access to **Checkout Sessions** and **Refunds**; `payments:check` also reads the account, so confirm that check passes with the restricted key on staging before using one in production.
 
 Webhook endpoints (both paths are accepted; prefer the first):
 
@@ -103,27 +108,60 @@ Local webhook testing: `stripe listen --forward-to 127.0.0.1:8080/api/v1/payment
 
 Payments are not functional until each item is done for the target environment:
 
-1. Razorpay account in the right mode, with International Payments activated if any non-INR currency is listed in `RAZORPAY_CURRENCIES`.
-2. Stripe account activated, with the AED/GBP/USD presentment currencies available for its country.
-3. Keys and webhook secrets injected for the environment (test on staging, live on production).
+1. Razorpay account in the right mode. Live mode needs KYC and website approval to be complete (the website is reviewed once the site, pricing, contact and policy pages are public). International Payments must be activated before any non-INR currency is listed in `RAZORPAY_CURRENCIES`.
+2. Stripe: not used in this deployment.
+3. Keys and webhook secrets injected for the environment (test on staging, live on production). Live keys are generated in the Razorpay Dashboard in **Live mode** → Account & Settings → API keys. The secret is shown only once, so paste it straight into the server's environment file.
 4. Webhooks registered at the URLs above with the listed events.
 5. `php bin/console payments:check` passes.
 6. On staging, one end-to-end test-mode payment per gateway and currency, including a failed card, a retry with the other gateway, a partial refund and a full refund, confirmed in both the admin and the gateway dashboard.
 7. Admin → Settings → Payments routing reviewed.
 
-## 2. Google Calendar & Meet
+## 2. Google Workspace: Gmail, Calendar and Meet
 
-* OAuth 2.0 Web Server flow (offline access, `prompt=consent` to guarantee a refresh token). Scope: `https://www.googleapis.com/auth/calendar.events`.
-* Admin clicks **Connect Google Calendar** → `POST /admin/integrations/google/connect` returns the Google consent URL → Google → `/admin/integrations/google/callback?code&state`. `state` is short-lived, HMAC-signed and bound to the admin's live session (CSRF protection).
-* Tokens stored encrypted in `calendar_integrations`; access token refreshed 2 minutes before expiry. Revocation (`invalid_grant`) marks the integration `needs_reauth` and alerts admins.
-* Event creation: `POST /calendars/{calendarId}/events?conferenceDataVersion=1&sendUpdates=all` with `conferenceData.createRequest.requestId = appointment.reference` (Google deduplicates by `requestId`, so retries never create two meetings). The event `id` is also derived deterministically from the reference, so a retried insert returns `409` and we fetch the existing event instead.
-* Reminders: `reminders.useDefault=false`, overrides built from enabled reminder settings (popup + email).
-* Updates: reschedule → `PATCH` start/end; cancellation → `DELETE` with `sendUpdates=all`.
-* Failure handling: calendar work runs in the job queue (`calendar.sync`) with exponential backoff. After a successful payment the appointment stays `confirmed` with `calendar_sync_status=failed` until a retry succeeds; admins are emailed and can press **Sync again** on the appointment. Clients are never re-charged.
+**Status:** covered by tests against mocked Google endpoints. Run locally against the real account hansterahiansh@gmail.com, where Test Gmail, Test Calendar and Test Meet passed. Production needs its own redirect URI and a published consent screen (see Google Cloud setup below).
 
-Credentials required: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_CALENDAR_ID` (default `primary`). Use separate OAuth clients (and ideally separate Google accounts/calendars) for staging and production.
+One OAuth connection (`GoogleAccount`) serves all three services:
 
-Setup: Google Cloud Console → new project → enable **Google Calendar API** → OAuth consent screen (Internal if Workspace, else External, which needs Google's verification for the calendar scope before non-test users can connect) → Credentials → OAuth client ID (Web) → authorised redirect URI `{API_URL}/api/v1/admin/integrations/google/callback`. Until an admin completes the connection, confirmed Google Meet appointments tell the client that their private link will be shared before the session, and the calendar job keeps retrying (then shows as failed in the admin).
+* **OAuth 2.0 web-server flow** with offline access and `prompt=consent`. Scopes (the minimum set): `calendar.events` (events and Meet conferences), `openid` and `email` (to show which account is connected). `gmail.send` (send only; no read access) is requested **only when `MAIL_DRIVER=gmail`**. With SMTP the Gmail row shows **Not used**. No service account is used: a service account cannot act for a personal Gmail account.
+* **Connect:** Admin → Integrations → Google Workspace (`/admin/settings/integrations/google`) → **Connect Google** → `POST /admin/integrations/google/connect` returns the consent URL → Google → `GET /admin/integrations/google/callback?code&state`. `state` is short-lived, HMAC-signed and bound to the admin's live session (CSRF protection). When `GOOGLE_ACCOUNT_EMAIL` is set, any other account is refused and its token revoked.
+* **Tokens** are stored encrypted in `calendar_integrations` and never leave the server. The access token is refreshed 2 minutes before expiry, and a `401` is retried once with a fresh token. The scopes Google actually granted are stored, and refreshed on every token refresh, so a permission the user unticked shows as **Permission not granted**.
+* **Revocation** (`invalid_grant`) marks the connection `needs_reauth`, pauses Gmail, Calendar and Meet work, shows a dashboard warning and queues one admin alert. If Gmail is also the mail driver, that alert can't be delivered until Google is reconnected, so the dashboard warning is the reliable signal.
+
+**Calendar and Meet**
+
+* Event creation: `POST /calendars/{calendarId}/events?conferenceDataVersion=1&sendUpdates=all`, with `conferenceData.createRequest.requestId` set to the booking reference. Google deduplicates by `requestId`, so retries never create two meetings. The event `id` is also derived from the reference, so a retried insert returns `409` and the existing event is fetched instead.
+* Meet: a pending conference is polled briefly. If Google reports no conference, it is requested once more; if that also fails, the job retries.
+* The client is the attendee and the connected account is the organiser. The event is private and guests can't see each other or invite others.
+* The event description holds booking logistics only: service, appointment type, duration and format, client name, reference, payment status, and the manage link. It never includes application answers or notes, because guests can read it.
+* Reminders: `reminders.useDefault=false`, with popup overrides from the reminder settings (default 24 h, 1 h and 15 min). Application email reminders run separately and skip cancelled, refunded and expired bookings.
+* Updates: reschedule → `PATCH` start and end (same event ID); cancellation → `DELETE` with `sendUpdates=all`.
+* Failure handling: calendar work runs in the job queue (`calendar.sync`) with exponential backoff. While Google is not connected, confirmed bookings wait with `calendar_sync_status=pending` instead of failing. Connecting Google re-queues every upcoming pending or failed booking. After a successful payment the appointment stays `confirmed` whatever happens to calendar sync; admins are emailed on final failure and can press **Sync again**. Clients are never re-charged.
+* Gatherings and retreats are not synced to Google Calendar yet.
+
+**Gmail**
+
+* `MAIL_DRIVER=gmail` sends every outbox email through `users.messages.send` as the connected account. Messages appear in its Sent folder.
+* The From address is always the connected account; `MAIL_FROM_NAME` sets the display name. Headers are UTF-8 encoded, and addresses containing line breaks are rejected.
+* Gmail's daily sending limits apply (roughly 500 recipients a day for a personal Gmail account). Use SMTP through a transactional provider if volume grows.
+
+**Admin page and tests**
+
+* The page shows OAuth, Gmail, Calendar and Meet status, the connected account, the calendar, the last successful sync, the last error, the redirect URI to register, and the last 25 Google operations. It never shows the client secret, access token or refresh token.
+* **Test Gmail** sends one message to the operations address (`notifications.admin_email` setting, else `MAIL_ADMIN_ADDRESS`, else the admin's own email).
+* **Test Calendar** and **Test Meet** create a private, non-blocking, guest-free event tomorrow (with a Meet conference for the Meet test), then delete it without sending notifications.
+* Test events carry a private marker. **Remove leftover test events** deletes any that a failed cleanup left behind and touches nothing else.
+* Tests are rate-limited (20 an hour) and audited.
+* **Integration log** (`integration_logs`): operation, outcome, HTTP status, error category, internal reference and duration only. It never holds tokens, secrets, addresses, message content or Google's error text. Entries are kept for 90 days.
+* **Error categories** have administrator-friendly messages: invalid client, redirect URI mismatch, access denied (including "not a test user"), missing permission, revoked access, API not enabled, calendar not found, quota, Meet failure, network and Google outage. Public users never see Google errors.
+
+Configuration: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (secret; environment only), `GOOGLE_REDIRECT_URI`, `GOOGLE_CALENDAR_ID` (default `primary`), and optional `GOOGLE_ACCOUNT_EMAIL`. Refresh tokens are not configured in the environment; they come from the **Connect** button. Use a separate OAuth client per environment, or at least register each environment's redirect URI.
+
+Google Cloud setup:
+1. Create a project and enable the **Google Calendar API**, plus the **Gmail API** if `MAIL_DRIVER=gmail`.
+2. Configure the OAuth consent screen as **External** (a personal Gmail account can't use Internal). Add the scopes above.
+3. While the app is in **Testing**, add the account as a test user. Google expires Testing refresh tokens after 7 days, so expect to reconnect weekly.
+4. To stop the weekly reconnect, set the publishing status to **In production**. That needs a public homepage and a published privacy policy on the authorised domain (`hansterahiansh.com`). `calendar.events` and `gmail.send` are sensitive scopes. Until Google verifies the app, the consent screen shows an "unverified app" warning that the admin can click through; submit for verification to remove it.
+5. Create an OAuth client ID of type **Web application**, with the authorised redirect URI `{API_URL}/api/v1/admin/integrations/google/callback`. For production that is `https://www.hansterahiansh.com/api/v1/admin/integrations/google/callback`, and the authorised JavaScript origin is `https://www.hansterahiansh.com`.
 
 ## 3. Email
 
@@ -134,9 +172,15 @@ Setup: Google Cloud Console → new project → enable **Google Calendar API** �
   * Appointments: `appointment_reserved`, `appointment_payment_request`, `appointment_confirmation`, `appointment_meeting_details`, `appointment_reminder`, `appointment_rescheduled`, `appointment_cancelled`.
   * Payments: `payment_confirmation`, `payment_failed`, `refund_initiated`, `refund_confirmation`.
   * Gatherings: `event_registration_confirmation`, `event_payment_request`, `event_waitlisted`, `event_waitlist_offer`, `event_registration_cancelled`, `event_reminder`.
-  * Admin and account: `admin_new_application`, `admin_new_booking`, `admin_integration_failure`, `admin_invitation`, `password_reset`, `privacy_request_verification`.
+  * Admin and account: `admin_new_application`, `admin_new_booking`, `admin_new_event_registration`, `admin_payment_succeeded`, `admin_payment_failed`, `admin_integration_failure`, `admin_invitation`, `password_reset`, `privacy_request_verification`.
 
-Credentials required: `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_ENCRYPTION` (`tls`), `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME`, `MAIL_ADMIN_ADDRESS`. In local development, `MAIL_DRIVER=log` writes rendered emails to `storage/logs/mail.log` (recipients redacted). Admin → Integrations → **Send test email** checks delivery.
+Drivers: `smtp`, `gmail` (Gmail API through the Google connection; see section 2) or `log` (local only). Production accepts `smtp` or `gmail`.
+
+SMTP credentials: `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_ENCRYPTION` (`tls` for STARTTLS on 587, `ssl` for 465), `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME`, `MAIL_REPLY_TO` (optional Reply-To when the sender mailbox is unattended), `MAIL_ADMIN_ADDRESS`. Production sends as `noreply@hansterahiansh.com`, with replies and admin alerts going to `info@hansterahiansh.com`.
+
+Production (www.hansterahiansh.com) uses the domain's own cPanel mailbox: `mail.hansterahiansh.com:465` (`ssl`), user and From `info@hansterahiansh.com`. The domain already publishes SPF (`a mx`), DKIM and DMARC (`p=none`) for that server. With the `gmail` driver, mail would instead come from the connected Gmail address.
+
+Delivery is at-least-once. A send that fails is retried (1, 5, 15, 60 and 240 minutes) and never changes the state of a payment or booking. A message whose worker was killed mid-send (shared hosts stop long-running processes) is re-queued by the scheduler after 15 minutes. In local development, `MAIL_DRIVER=log` writes rendered emails to `storage/logs/mail.log` (recipients redacted). Admin → Integrations → **Send test email** checks delivery.
 
 ## 4. Analytics
 

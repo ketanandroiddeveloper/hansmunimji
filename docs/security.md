@@ -7,7 +7,7 @@
 | Confidential applications (executive identity, objectives) | DB dump, SQLi, insider over-access, log leakage | Field-level AES-256-GCM, prepared statements only, `applications.view_confidential` permission, audit log on every decrypt-view, log redaction |
 | Admin accounts | Credential stuffing, session theft, CSRF | Argon2id, progressive throttling + lockout, optional TOTP, HttpOnly/Secure/SameSite=Strict `__Host-` cookie, CSRF header, idle+absolute session expiry |
 | Payments | Forged success callbacks, replayed webhooks, amount tampering | Server-side amount computation, signature verification, gateway re-fetch, `webhook_events` uniqueness, idempotent state transitions |
-| Google OAuth tokens | Theft from DB | Encrypted at rest, minimal scope (`calendar.events`), `state` parameter bound to admin session |
+| Google OAuth tokens | Theft from DB | Encrypted at rest, never returned by the API or logged, minimal scopes (`calendar.events`, `gmail.send`, `openid`, `email`), `state` bound to the admin session, optional `GOOGLE_ACCOUNT_EMAIL` lock |
 | Private audio | Hotlinking / path disclosure | Files outside web root, HMAC-signed expiring URLs, no storage paths in API |
 | Uploaded media | Malicious files, polyglots | Extension + `finfo` MIME allowlist, size limits, GD re-encode (strips metadata/EXIF GPS), random filenames, no execution in upload dir |
 | Client manage links | Enumeration | 128-bit random reference + 256-bit token (stored as SHA-256), expiry, rate limit |

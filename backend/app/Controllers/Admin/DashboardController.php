@@ -9,13 +9,13 @@ use App\Core\Clock;
 use App\Core\Database;
 use App\Core\Request;
 use App\Core\Response;
-use App\Integrations\Google\GoogleCalendarClient;
+use App\Integrations\Google\GoogleAccount;
 use App\Security\Crypto;
 use App\Security\Rbac;
 
 final class DashboardController extends Controller
 {
-    public function __construct(private Database $db, private Clock $clock, private Rbac $rbac, private Crypto $crypto, private GoogleCalendarClient $google)
+    public function __construct(private Database $db, private Clock $clock, private Rbac $rbac, private Crypto $crypto, private GoogleAccount $google)
     {
     }
 
@@ -66,7 +66,12 @@ final class DashboardController extends Controller
 
         if ($this->rbac->can($userId, 'integrations.manage')) {
             $out['health'] = [
-                'google_calendar' => $this->google->isConnected() ? 'connected' : ($this->google->isConfigured() ? 'not_connected' : 'not_configured'),
+                'google_calendar' => match (true) {
+                    !$this->google->isConfigured() => 'not_configured',
+                    $this->google->status() === 'needs_reauth' => 'needs_reauth',
+                    $this->google->isConnected() => $this->google->missingScopes() === [] ? 'connected' : 'missing_permission',
+                    default => 'not_connected',
+                },
                 'failed_jobs' => (int) $this->db->value("SELECT COUNT(*) FROM jobs WHERE status = 'failed' AND finished_at >= ?", [$now->modify('-7 days')->format('Y-m-d H:i:s')]),
                 'failed_emails' => (int) $this->db->value("SELECT COUNT(*) FROM notifications WHERE status = 'failed' AND created_at >= ?", [$now->modify('-7 days')->format('Y-m-d H:i:s')]),
                 'failed_webhooks' => (int) $this->db->value("SELECT COUNT(*) FROM webhook_events WHERE status = 'failed'"),

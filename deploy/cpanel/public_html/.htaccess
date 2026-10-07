@@ -1,0 +1,75 @@
+# Production web root for https://www.hansterahiansh.com on cPanel (Apache).
+# Static SPA build + api.php, which hands /api/*, /sitemap.xml and /robots.txt to the PHP backend
+# kept outside public_html. Edit the host name below if the canonical domain ever changes.
+
+Options -Indexes -MultiViews
+DirectoryIndex index.html
+ServerSignature Off
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Certificate validation (AutoSSL / Let's Encrypt) must reach these files over plain HTTP.
+    RewriteRule ^\.well-known/ - [L]
+
+    # Never serve dotfiles or source maps.
+    RewriteRule (^|/)\. - [F]
+    RewriteRule \.map$ - [F]
+
+    # HTTPS on the canonical www host. Webhook and OAuth URLs must be registered with exactly this host:
+    # a redirect turns a provider's POST into a GET and the call is lost.
+    RewriteCond %{HTTPS} !=on
+    RewriteRule ^ https://www.hansterahiansh.com%{REQUEST_URI} [R=301,L,NE]
+    RewriteCond %{HTTP_HOST} !^www\.hansterahiansh\.com$ [NC]
+    RewriteRule ^ https://www.hansterahiansh.com%{REQUEST_URI} [R=301,L,NE]
+
+    # API, sitemap and robots.txt → PHP backend.
+    RewriteRule ^(api/|sitemap\.xml$|robots\.txt$) api.php [L,QSA]
+
+    # Uploaded public media (symlink to the backend's storage/public). Nothing executable is served from it.
+    RewriteRule ^media/.*\.(php\d?|phtml|phar|pl|py|cgi|sh|html?|svg)$ - [F,NC]
+
+    # Existing files and directories (including prerendered page/index.html) are served as they are.
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # A missing build asset or media file is a 404, not the SPA shell.
+    RewriteRule ^(assets|media)/ - [R=404,L]
+
+    # Everything else is a client-side route: the prerender shell if present, otherwise index.html.
+    RewriteCond %{DOCUMENT_ROOT}/app-shell.html -f
+    RewriteRule ^ app-shell.html [L]
+    RewriteRule ^ index.html [L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    # The API sets its own, stricter headers; these apply to the site and the admin.
+    <If "%{THE_REQUEST} !~ m#^\S+\s+/(api/|sitemap\.xml|robots\.txt)#">
+        # No includeSubDomains: this header is also sent on the apex redirect, and cPanel's mail/webmail
+        # subdomains must not be forced onto HTTPS unless their certificates are known to be valid.
+        Header always set Strict-Transport-Security "max-age=63072000"
+        Header always set X-Content-Type-Options "nosniff"
+        Header always set X-Frame-Options "DENY"
+        Header always set Referrer-Policy "strict-origin-when-cross-origin"
+        Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(self \"https://checkout.razorpay.com\" \"https://api.razorpay.com\")"
+        # Razorpay opens bank / 3-D Secure windows that must be able to report back.
+        Header always set Cross-Origin-Opener-Policy "same-origin-allow-popups"
+        Header always set Content-Security-Policy "default-src 'self'; script-src 'self' https://checkout.razorpay.com https://www.googletagmanager.com; frame-src https://api.razorpay.com https://checkout.razorpay.com; connect-src 'self' https://api.razorpay.com https://lumberjack.razorpay.com https://www.google-analytics.com https://*.google-analytics.com https://www.googletagmanager.com; img-src 'self' data: https:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; form-action 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    </If>
+
+    <If "%{THE_REQUEST} =~ m#^\S+\s+/admin#">
+        Header always set X-Robots-Tag "noindex, nofollow"
+        Header always set Cache-Control "no-store"
+    </If>
+    <ElseIf "%{THE_REQUEST} =~ m#^\S+\s+/(assets|media)/#">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </ElseIf>
+    <ElseIf "%{THE_REQUEST} !~ m#^\S+\s+/(api/|sitemap\.xml|robots\.txt)#">
+        Header set Cache-Control "no-cache"
+    </ElseIf>
+</IfModule>
+
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json image/svg+xml
+</IfModule>

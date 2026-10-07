@@ -71,7 +71,8 @@ erDiagram
 | Payments | `payments`, `refunds`, `webhook_events` | One `payments` row per checkout attempt, with a public `reference`; `webhook_events (gateway, event_id)` unique → duplicate protection; `refunds.idempotency_key` unique (up to 100 characters) → a refund is never sent twice |
 | Events | `events`, `event_prices`, `event_registrations`, `event_reminders_sent` | One price row per currency; tax, registration window, waitlist and cancellation policy on `events`; seat quota enforced under a lock; registrations store subtotal, tax and total |
 | History | `status_history` | Every status change for applications, appointments, registrations, payments and refunds, with source and acting admin; notes never contain personal or payment data |
-| Integrations | `calendar_integrations` | OAuth tokens encrypted; one active connection per environment |
+| Integrations | `calendar_integrations` | Google OAuth connection (Gmail, Calendar, Meet): tokens encrypted, granted scopes, one connection per environment |
+| | `integration_logs` | Third-party call trail: operation, outcome, HTTP status, error category, internal reference. No tokens, addresses or content; kept 90 days |
 | Messaging | `email_templates`, `notifications`, `jobs` | Outbox + generic job queue with backoff |
 | Audit | `audit_logs` | Actor, action, entity, hashed IP; never confidential content |
 

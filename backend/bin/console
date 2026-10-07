@@ -9,6 +9,10 @@ if (PHP_SAPI !== 'cli') {
     exit(1);
 }
 
+// PHP notices go to stderr once (log_errors), not duplicated into command output.
+ini_set('display_errors', '0');
+ini_set('log_errors', '1');
+
 $command = $argv[1] ?? 'help';
 
 // keys:generate must work before any keys exist, so it runs without booting the app.

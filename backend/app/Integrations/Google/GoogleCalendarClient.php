@@ -6,118 +6,28 @@ namespace App\Integrations\Google;
 
 use App\Core\Clock;
 use App\Core\Config;
-use App\Core\Database;
-use App\Security\Crypto;
-use GuzzleHttp\ClientInterface;
-use GuzzleHttp\Exception\GuzzleException;
+use App\Services\IntegrationLog;
 
 /**
- * Google OAuth 2.0 (web server flow) + Calendar API v3 over REST.
- * Tokens are stored encrypted in `calendar_integrations`, one connection per environment.
+ * Google Calendar API v3 over REST, with Meet conferences created through `conferenceData`
+ * (the only supported way to obtain a Meet link). Authorisation lives in GoogleAccount.
  */
 final class GoogleCalendarClient
 {
-    private const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-    private const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-    private const REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
     private const API = 'https://www.googleapis.com/calendar/v3/';
+    private const TEST_PROPERTY = 'pa_integration_test';
 
     public function __construct(
-        private ClientInterface $http,
+        private GoogleAccount $account,
         private Config $config,
-        private Database $db,
-        private Crypto $crypto,
         private Clock $clock,
+        private IntegrationLog $log,
     ) {
     }
 
-    public function isConfigured(): bool
+    public function isReady(): bool
     {
-        return $this->config->get('google.client_id') !== '' && $this->config->get('google.client_secret') !== '' && $this->config->get('google.redirect_uri') !== '';
-    }
-
-    /** @return array<string, mixed>|null */
-    public function integration(): ?array
-    {
-        return $this->db->first(
-            "SELECT * FROM calendar_integrations WHERE provider = 'google' AND environment = ?",
-            [$this->config->environment()],
-        );
-    }
-
-    public function isConnected(): bool
-    {
-        return ($this->integration()['status'] ?? null) === 'connected';
-    }
-
-    public function authorizationUrl(string $state): string
-    {
-        return self::AUTH_URL . '?' . http_build_query([
-            'client_id' => $this->config->get('google.client_id'),
-            'redirect_uri' => $this->config->get('google.redirect_uri'),
-            'response_type' => 'code',
-            'scope' => implode(' ', $this->config->get('google.scopes')),
-            'access_type' => 'offline',
-            'prompt' => 'consent',
-            'include_granted_scopes' => 'true',
-            'state' => $state,
-        ]);
-    }
-
-    public function connect(string $code, int $userId): string
-    {
-        $tokens = $this->tokenRequest(['grant_type' => 'authorization_code', 'code' => $code, 'redirect_uri' => $this->config->get('google.redirect_uri')]);
-        if (empty($tokens['refresh_token'])) {
-            throw new GoogleApiError('Google did not return a refresh token. Remove the app from your Google account permissions and connect again.');
-        }
-        $email = $this->emailFromIdToken((string) ($tokens['id_token'] ?? ''));
-        $now = $this->clock->nowString();
-
-        $this->db->run(
-            "INSERT INTO calendar_integrations
-                (provider, environment, account_email, calendar_id, access_token_enc, refresh_token_enc, token_expires_at, scopes, status, connected_by, last_error, created_at, updated_at)
-             VALUES ('google', :env, :email, :calendar, :access, :refresh, :expires, :scopes, 'connected', :user, NULL, :now1, :now2)
-             ON DUPLICATE KEY UPDATE account_email = VALUES(account_email), calendar_id = VALUES(calendar_id), access_token_enc = VALUES(access_token_enc),
-                refresh_token_enc = VALUES(refresh_token_enc), token_expires_at = VALUES(token_expires_at), scopes = VALUES(scopes),
-                status = 'connected', connected_by = VALUES(connected_by), last_error = NULL, updated_at = VALUES(updated_at)",
-            [
-                'env' => $this->config->environment(),
-                'email' => $email,
-                'calendar' => $this->config->get('google.calendar_id', 'primary'),
-                'access' => $this->crypto->encrypt((string) $tokens['access_token'], 'calendar_integrations.access_token'),
-                'refresh' => $this->crypto->encrypt((string) $tokens['refresh_token'], 'calendar_integrations.refresh_token'),
-                'expires' => $this->clock->now()->modify('+' . (int) $tokens['expires_in'] . ' seconds')->format('Y-m-d H:i:s'),
-                'scopes' => (string) ($tokens['scope'] ?? ''),
-                'user' => $userId,
-                'now1' => $now,
-                'now2' => $now,
-            ],
-        );
-
-        return $email;
-    }
-
-    public function disconnect(): void
-    {
-        $integration = $this->integration();
-        if ($integration === null) {
-            return;
-        }
-        $refresh = $this->crypto->decrypt($integration['refresh_token_enc'], 'calendar_integrations.refresh_token');
-        if ($refresh) {
-            try {
-                $this->http->request('POST', self::REVOKE_URL, ['form_params' => ['token' => $refresh]]);
-            } catch (GuzzleException) {
-                // Revocation is best-effort; local tokens are destroyed regardless.
-            }
-        }
-        $this->db->update('calendar_integrations', [
-            'access_token_enc' => null,
-            'refresh_token_enc' => null,
-            'token_expires_at' => null,
-            'status' => 'disconnected',
-            'updated_at' => $this->clock->nowString(),
-        ], ['id' => $integration['id']]);
+        return $this->account->hasScope(GoogleAccount::SCOPE_CALENDAR);
     }
 
     /**
@@ -149,48 +59,38 @@ final class GoogleCalendarClient
             $body['location'] = $event['location'];
         }
         if ($event['with_meet']) {
-            $body['conferenceData'] = ['createRequest' => [
-                'requestId' => $event['reference'],
-                'conferenceSolutionKey' => ['type' => 'hangoutsMeet'],
-            ]];
+            $body['conferenceData'] = self::conferenceRequest($event['reference']);
         }
 
-        $calendar = rawurlencode((string) ($this->integration()['calendar_id'] ?? 'primary'));
-        [$status, $data] = $this->api('POST', "calendars/{$calendar}/events?conferenceDataVersion=1&sendUpdates=all", $body);
+        $ref = $event['reference'];
+        [$status, $data] = $this->request('calendar.create', 'POST', $this->events('?conferenceDataVersion=1&sendUpdates=all'), $body, $ref, [409]);
         if ($status === 409) {
             // Already created by a previous attempt — fetch instead of duplicating.
-            [$status, $data] = $this->api('GET', "calendars/{$calendar}/events/{$id}");
+            [, $data] = $this->request('calendar.get', 'GET', $this->events('/' . $id), null, $ref);
         }
-        if ($status >= 400) {
-            throw new GoogleApiError('Calendar event creation failed (' . $status . '): ' . $this->errorMessage($data));
+        if ($event['with_meet']) {
+            $data = $this->ensureConference($data, $ref);
         }
 
-        return ['id' => (string) $data['id'], 'meet_url' => $this->meetUrl($data)];
+        return ['id' => (string) $data['id'], 'meet_url' => self::meetUrl($data)];
     }
 
     /** @return array{id: string, meet_url: ?string} */
-    public function updateEventTime(string $eventId, string $startsAt, string $endsAt, string $timezone): array
+    public function updateEventTime(string $eventId, string $startsAt, string $endsAt, string $timezone, ?string $reference = null): array
     {
-        $calendar = rawurlencode((string) ($this->integration()['calendar_id'] ?? 'primary'));
-        [$status, $data] = $this->api('PATCH', "calendars/{$calendar}/events/" . rawurlencode($eventId) . '?conferenceDataVersion=1&sendUpdates=all', [
+        [, $data] = $this->request('calendar.update', 'PATCH', $this->events('/' . rawurlencode($eventId) . '?conferenceDataVersion=1&sendUpdates=all'), [
             'start' => ['dateTime' => $startsAt, 'timeZone' => $timezone],
             'end' => ['dateTime' => $endsAt, 'timeZone' => $timezone],
             'status' => 'confirmed',
-        ]);
-        if ($status >= 400) {
-            throw new GoogleApiError('Calendar event update failed (' . $status . '): ' . $this->errorMessage($data));
-        }
+        ], $reference);
 
-        return ['id' => (string) $data['id'], 'meet_url' => $this->meetUrl($data)];
+        return ['id' => (string) $data['id'], 'meet_url' => self::meetUrl($data)];
     }
 
-    public function cancelEvent(string $eventId): void
+    public function cancelEvent(string $eventId, ?string $reference = null): void
     {
-        $calendar = rawurlencode((string) ($this->integration()['calendar_id'] ?? 'primary'));
-        [$status, $data] = $this->api('DELETE', "calendars/{$calendar}/events/" . rawurlencode($eventId) . '?sendUpdates=all');
-        if ($status >= 400 && !in_array($status, [404, 410], true)) {
-            throw new GoogleApiError('Calendar event cancellation failed (' . $status . '): ' . $this->errorMessage($data));
-        }
+        // 404/410: already removed in Google Calendar, which is the desired end state.
+        $this->request('calendar.cancel', 'DELETE', $this->events('/' . rawurlencode($eventId) . '?sendUpdates=all'), null, $reference, [404, 410]);
     }
 
     public function eventId(string $reference): string
@@ -199,82 +99,146 @@ final class GoogleCalendarClient
         return 'pa' . substr(hash('sha256', $this->config->environment() . '|' . $reference), 0, 40);
     }
 
-    private function accessToken(): string
+    /**
+     * Creates a private, non-blocking test event with no guests (and, for Meet, a conference),
+     * verifies it, then deletes it without notifying anyone. Never touches booking events.
+     *
+     * @return array{event_created: bool, meet_created: ?bool, cleaned_up: bool}
+     */
+    public function runTest(bool $withMeet): array
     {
-        $integration = $this->integration();
-        if ($integration === null || $integration['status'] !== 'connected') {
-            throw new GoogleApiError('Google Calendar is not connected.');
-        }
-        $expires = $integration['token_expires_at'] ? Clock::utc((string) $integration['token_expires_at']) : null;
-        if ($expires !== null && $expires > $this->clock->now()->modify('+2 minutes')) {
-            return (string) $this->crypto->decrypt($integration['access_token_enc'], 'calendar_integrations.access_token');
+        $operation = $withMeet ? 'test.meet' : 'test.calendar';
+        $id = 'patest' . bin2hex(random_bytes(10));
+        $start = $this->clock->now()->modify('+1 day')->setTime((int) $this->clock->now()->format('H'), 0);
+        $body = [
+            'id' => $id,
+            'summary' => 'Integration test (safe to delete)',
+            'description' => 'Created by the Google Workspace test in the administration panel and removed automatically.',
+            'start' => ['dateTime' => $start->format('Y-m-d\TH:i:s\Z'), 'timeZone' => 'UTC'],
+            'end' => ['dateTime' => $start->modify('+15 minutes')->format('Y-m-d\TH:i:s\Z'), 'timeZone' => 'UTC'],
+            'visibility' => 'private',
+            'transparency' => 'transparent',
+            'reminders' => ['useDefault' => false, 'overrides' => []],
+            'extendedProperties' => ['private' => [self::TEST_PROPERTY => '1']],
+        ];
+        if ($withMeet) {
+            $body['conferenceData'] = self::conferenceRequest($id);
         }
 
-        $refresh = (string) $this->crypto->decrypt($integration['refresh_token_enc'], 'calendar_integrations.refresh_token');
-        try {
-            $tokens = $this->tokenRequest(['grant_type' => 'refresh_token', 'refresh_token' => $refresh]);
-        } catch (GoogleApiError $e) {
-            if (str_contains($e->getMessage(), 'invalid_grant')) {
-                $this->db->update('calendar_integrations', ['status' => 'needs_reauth', 'last_error' => 'Authorization revoked or expired.', 'updated_at' => $this->clock->nowString()], ['id' => $integration['id']]);
+        [, $data] = $this->request($operation, 'POST', $this->events('?conferenceDataVersion=1&sendUpdates=none'), $body, 'test');
+        $meet = null;
+        $meetError = null;
+        if ($withMeet) {
+            try {
+                $data = $this->ensureConference($data, 'test');
+                $meet = true;
+            } catch (GoogleApiError $e) {
+                $meet = false;
+                $meetError = $e;
             }
-            throw $e;
         }
 
-        $this->db->update('calendar_integrations', [
-            'access_token_enc' => $this->crypto->encrypt((string) $tokens['access_token'], 'calendar_integrations.access_token'),
-            'token_expires_at' => $this->clock->now()->modify('+' . (int) $tokens['expires_in'] . ' seconds')->format('Y-m-d H:i:s'),
-            'updated_at' => $this->clock->nowString(),
-        ], ['id' => $integration['id']]);
+        $cleaned = true;
+        try {
+            $this->request('test.cleanup', 'DELETE', $this->events('/' . rawurlencode((string) $data['id']) . '?sendUpdates=none'), null, 'test', [404, 410]);
+        } catch (GoogleApiError) {
+            $cleaned = false;
+        }
+        if ($meetError !== null) {
+            throw $meetError;
+        }
 
-        return (string) $tokens['access_token'];
+        return ['event_created' => true, 'meet_created' => $meet, 'cleaned_up' => $cleaned];
+    }
+
+    /** Deletes any leftover test events (found by their private marker); returns how many were removed. */
+    public function cleanupTestEvents(): int
+    {
+        $query = http_build_query(['privateExtendedProperty' => self::TEST_PROPERTY . '=1', 'maxResults' => 50, 'showDeleted' => 'false', 'singleEvents' => 'true']);
+        [, $data] = $this->request('test.cleanup_list', 'GET', $this->events('?' . $query), null, 'test');
+        $removed = 0;
+        foreach ((array) ($data['items'] ?? []) as $item) {
+            if (($item['extendedProperties']['private'][self::TEST_PROPERTY] ?? null) !== '1') {
+                continue;
+            }
+            $this->request('test.cleanup', 'DELETE', $this->events('/' . rawurlencode((string) $item['id']) . '?sendUpdates=none'), null, 'test', [404, 410]);
+            $removed++;
+        }
+
+        return $removed;
     }
 
     /**
-     * @param array<string, string> $params
+     * Meet conferences can be created asynchronously; waits briefly for a pending request and asks
+     * again (with a fresh requestId) when Google reports a failure.
+     *
+     * @param array<string, mixed> $event
      * @return array<string, mixed>
      */
-    private function tokenRequest(array $params): array
+    private function ensureConference(array $event, string $reference): array
     {
-        try {
-            $response = $this->http->request('POST', self::TOKEN_URL, ['form_params' => $params + [
-                'client_id' => $this->config->get('google.client_id'),
-                'client_secret' => $this->config->get('google.client_secret'),
-            ]]);
-        } catch (GuzzleException $e) {
-            throw new GoogleApiError('Google OAuth is unreachable.', 0, $e);
+        $event = $this->awaitConference($event, $reference);
+        if (self::meetUrl($event) !== null) {
+            $this->log->record('google', 'calendar.meet', true, null, null, $reference);
+
+            return $event;
         }
-        $data = json_decode((string) $response->getBody(), true);
-        if ($response->getStatusCode() >= 400 || !is_array($data) || empty($data['access_token'])) {
-            $error = is_array($data) ? (string) ($data['error'] ?? 'unknown') : 'invalid_response';
-            throw new GoogleApiError("Google OAuth token request failed: {$error}");
+        [, $event] = $this->request(
+            'calendar.meet_retry',
+            'PATCH',
+            $this->events('/' . rawurlencode((string) $event['id']) . '?conferenceDataVersion=1&sendUpdates=none'),
+            ['conferenceData' => self::conferenceRequest($reference . '-' . bin2hex(random_bytes(4)))],
+            $reference,
+        );
+        $event = $this->awaitConference($event, $reference);
+        $created = self::meetUrl($event) !== null;
+        $this->log->record('google', 'calendar.meet', $created, null, $created ? null : 'meet_failed', $reference);
+        if (!$created) {
+            throw new GoogleApiError('meet_failed');
         }
 
-        return $data;
+        return $event;
+    }
+
+    /**
+     * @param array<string, mixed> $event
+     * @return array<string, mixed>
+     */
+    private function awaitConference(array $event, string $reference): array
+    {
+        for ($i = 0; $i < 3 && self::meetUrl($event) === null && ($event['conferenceData']['createRequest']['status']['statusCode'] ?? null) === 'pending'; $i++) {
+            usleep(800_000);
+            [, $event] = $this->request('calendar.get', 'GET', $this->events('/' . rawurlencode((string) $event['id'])), null, $reference);
+        }
+
+        return $event;
     }
 
     /**
      * @param array<string, mixed>|null $body
+     * @param list<int> $allow
      * @return array{0: int, 1: array<string, mixed>}
      */
-    private function api(string $method, string $path, ?array $body = null): array
+    private function request(string $operation, string $method, string $url, ?array $body, ?string $reference, array $allow = []): array
     {
-        $options = ['headers' => ['Authorization' => 'Bearer ' . $this->accessToken()]];
-        if ($body !== null) {
-            $options['json'] = $body;
-        }
-        try {
-            $response = $this->http->request($method, self::API . $path, $options);
-        } catch (GuzzleException $e) {
-            throw new GoogleApiError('Google Calendar is unreachable.', 0, $e);
-        }
-        $data = json_decode((string) $response->getBody(), true);
-        $this->db->run("UPDATE calendar_integrations SET last_synced_at = ? WHERE provider = 'google' AND environment = ?", [$this->clock->nowString(), $this->config->environment()]);
+        return $this->account->call($operation, GoogleAccount::SCOPE_CALENDAR, $method, $url, $body !== null ? ['json' => $body] : [], $reference, $allow);
+    }
 
-        return [$response->getStatusCode(), is_array($data) ? $data : []];
+    private function events(string $suffix): string
+    {
+        $calendar = (string) ($this->account->integration()['calendar_id'] ?? $this->config->get('google.calendar_id', 'primary'));
+
+        return self::API . 'calendars/' . rawurlencode($calendar) . '/events' . $suffix;
+    }
+
+    /** @return array{createRequest: array{requestId: string, conferenceSolutionKey: array{type: string}}} */
+    private static function conferenceRequest(string $requestId): array
+    {
+        return ['createRequest' => ['requestId' => $requestId, 'conferenceSolutionKey' => ['type' => 'hangoutsMeet']]];
     }
 
     /** @param array<string, mixed> $event */
-    private function meetUrl(array $event): ?string
+    public static function meetUrl(array $event): ?string
     {
         if (!empty($event['hangoutLink'])) {
             return (string) $event['hangoutLink'];
@@ -286,23 +250,5 @@ final class GoogleCalendarClient
         }
 
         return null;
-    }
-
-    /** @param array<string, mixed> $data */
-    private function errorMessage(array $data): string
-    {
-        return mb_substr((string) ($data['error']['message'] ?? 'unknown error'), 0, 180);
-    }
-
-    private function emailFromIdToken(string $idToken): ?string
-    {
-        // The ID token comes straight from Google's token endpoint over TLS, so its payload is trusted here.
-        $parts = explode('.', $idToken);
-        if (count($parts) !== 3) {
-            return null;
-        }
-        $payload = json_decode((string) base64_decode(strtr($parts[1], '-_', '+/')), true);
-
-        return is_array($payload) && isset($payload['email']) ? (string) $payload['email'] : null;
     }
 }

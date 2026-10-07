@@ -5,9 +5,12 @@ declare(strict_types=1);
 namespace Tests\Integration;
 
 use App\Core\HttpException;
+use App\Integrations\Email\Mailer;
 use App\Integrations\Payments\InvalidSignature;
 use App\Integrations\Payments\VerifiedPayment;
 use App\Services\Booking\BookingService;
+use App\Services\Booking\ReminderService;
+use App\Services\Notifications\NotificationService;
 use App\Services\Payments\PaymentService;
 
 final class AppointmentPaymentTest extends IntegrationTestCase
@@ -34,6 +37,7 @@ final class AppointmentPaymentTest extends IntegrationTestCase
 
     public function testVerifiedPaymentConfirmsOnceAndDuplicateWebhooksAreIgnored(): void
     {
+        $this->setting('notifications.admin_email', 'office@example.test');
         [$ref, $token, $id] = $this->book('INR');
         $order = $this->pay($ref, $token, 'razorpay');
 
@@ -49,7 +53,13 @@ final class AppointmentPaymentTest extends IntegrationTestCase
         self::assertSame(['created', 'captured'], $this->historyTo('payment', (int) $payment['id']));
         self::assertSame(['pending_payment', 'confirmed'], $this->historyTo('appointment', $id));
         self::assertSame(1, (int) $this->db->value("SELECT COUNT(*) FROM notifications WHERE template_slug = 'payment_confirmation'"));
+        self::assertSame(1, (int) $this->db->value("SELECT COUNT(*) FROM notifications WHERE template_slug = 'admin_payment_succeeded'"));
         self::assertSame('booked', $this->row('appointment_slots', 'appointment_id = ?', [$id])['status']);
+
+        // Google is not connected in tests: the calendar sync waits instead of failing and alerting.
+        $this->runJobs();
+        self::assertSame('pending', $this->row('appointments', 'id = ?', [$id])['calendar_sync_status']);
+        self::assertSame(0, (int) $this->db->value("SELECT COUNT(*) FROM jobs WHERE status = 'failed'"));
     }
 
     public function testRetriedRequestWithSameIdempotencyKeyReusesTheOrder(): void
@@ -163,6 +173,74 @@ final class AppointmentPaymentTest extends IntegrationTestCase
         self::assertSame('confirmed', $this->row('appointments', 'id = ?', [$id])['status']);
     }
 
+    public function testUnknownWebhookEventIsAcknowledgedOnceAndChangesNothing(): void
+    {
+        [$ref, $token, $id] = $this->book('USD');
+        $order = $this->pay($ref, $token, 'stripe');
+
+        self::assertSame('ignored', $this->webhook('stripe', ['id' => 'evt_unknown', 'kind' => 'customer.created', 'order_id' => $order['order_id']]));
+        self::assertSame('duplicate', $this->webhook('stripe', ['id' => 'evt_unknown', 'kind' => 'customer.created', 'order_id' => $order['order_id']]));
+
+        self::assertSame('ignored', $this->db->value("SELECT status FROM webhook_events WHERE event_id = 'evt_unknown'"));
+        self::assertSame('created', $this->row('payments', 'reference = ?', [$order['payment_reference']])['status']);
+        self::assertSame('pending_payment', $this->row('appointments', 'id = ?', [$id])['status']);
+    }
+
+    public function testCancelledCheckoutLeavesTheBookingPayableAndCanBeRetried(): void
+    {
+        [$ref, $token, $id] = $this->book('USD');
+        $order = $this->pay($ref, $token, 'stripe');
+
+        // Returning via the cancel URL changes nothing server-side; the session stays open until Stripe expires it.
+        self::assertSame('created', $this->row('payments', 'reference = ?', [$order['payment_reference']])['status']);
+
+        self::assertSame('processed', $this->webhook('stripe', ['id' => 'evt_expired', 'kind' => 'checkout_expired', 'order_id' => $order['order_id']]));
+        self::assertSame('cancelled', $this->row('payments', 'reference = ?', [$order['payment_reference']])['status']);
+        self::assertSame('pending_payment', $this->row('appointments', 'id = ?', [$id])['status']);
+
+        // A late "paid" for the expired session would still be honoured, but a new checkout is the normal path.
+        $retry = $this->svc(PaymentService::class)->retry($order['payment_reference'], $token, null, 'retry-after-cancel-01');
+        self::assertFalse($retry['gateway_changed']);
+        self::assertNotSame($order['order_id'], $retry['order_id']);
+
+        $this->captureWebhook($this->stripe, $retry['order_id'], 'evt_paid_after_retry');
+        self::assertSame('confirmed', $this->row('appointments', 'id = ?', [$id])['status']);
+        self::assertSame('cancelled', $this->row('payments', 'reference = ?', [$order['payment_reference']])['status']);
+    }
+
+    public function testProviderOutageCreatesNoPaymentAndNeverConfirmsFromTheBrowser(): void
+    {
+        [$ref, $token, $id] = $this->book('USD');
+        $this->stripe->unavailable = true;
+
+        try {
+            $this->pay($ref, $token, 'stripe');
+            self::fail('An unreachable provider must surface as an error.');
+        } catch (HttpException $e) {
+            self::assertSame(502, $e->status);
+            self::assertSame('gateway_unavailable', $e->errorCode);
+        }
+        self::assertSame(0, (int) $this->db->value('SELECT COUNT(*) FROM payments'));
+        self::assertSame('pending_payment', $this->row('appointments', 'id = ?', [$id])['status']);
+
+        $this->stripe->unavailable = false;
+        $order = $this->pay($ref, $token, 'stripe');
+        $this->stripe->settle($order['order_id'], VerifiedPayment::CAPTURED);
+        $this->stripe->unavailable = true;
+
+        try {
+            $this->svc(PaymentService::class)->verifyFromClient('stripe', ['order_id' => $order['order_id']]);
+            self::fail('Verification must fail while the provider is unreachable.');
+        } catch (HttpException $e) {
+            self::assertSame('gateway_unavailable', $e->errorCode);
+        }
+        self::assertSame('created', $this->row('payments', 'reference = ?', [$order['payment_reference']])['status']);
+
+        // The webhook remains authoritative and confirms the booking regardless.
+        $this->captureWebhook($this->stripe, $order['order_id'], 'evt_during_outage');
+        self::assertSame('confirmed', $this->row('appointments', 'id = ?', [$id])['status']);
+    }
+
     public function testLatePaymentForATimeBookedByAnotherClientIsRefundedAutomatically(): void
     {
         $startsAt = $this->clock->now()->modify('+3 days')->format('Y-m-d\TH:i:s\Z');
@@ -208,6 +286,64 @@ final class AppointmentPaymentTest extends IntegrationTestCase
 
         self::assertSame(0, $this->svc(BookingService::class)->expireUnpaid());
         self::assertSame('pending_payment', $this->row('appointments', 'id = ?', [$id])['status']);
+    }
+
+    public function testEmailOutageAfterPaymentKeepsThePaymentConfirmedAndTheEmailRetryable(): void
+    {
+        $this->c->set(Mailer::class, static fn () => new class implements Mailer {
+            public function send(string $to, string $subject, string $html, string $text): ?string
+            {
+                throw new \RuntimeException('SMTP delivery failed: connection refused');
+            }
+
+            public function isConfigured(): bool
+            {
+                return true;
+            }
+        });
+        [$ref, $token, $id] = $this->book('INR');
+        $order = $this->pay($ref, $token, 'razorpay');
+        $this->captureWebhook($this->razorpay, $order['order_id'], 'evt_mail_down');
+
+        $sent = $this->svc(NotificationService::class)->processDue();
+
+        self::assertGreaterThan(0, $sent);
+        self::assertSame('captured', $this->row('payments', 'reference = ?', [$order['payment_reference']])['status']);
+        self::assertSame('confirmed', $this->row('appointments', 'id = ?', [$id])['status']);
+        $mail = $this->row('notifications', "template_slug = 'payment_confirmation'");
+        self::assertSame('queued', $mail['status']);
+        self::assertSame(1, (int) $mail['attempts']);
+        self::assertGreaterThan($this->clock->nowString(), $mail['available_at']);
+    }
+
+    public function testEmailStuckInSendingAfterAWorkerCrashIsQueuedAgain(): void
+    {
+        $notifications = $this->svc(NotificationService::class);
+        $stuck = $notifications->queue('payment_confirmation', 'client@example.test', ['reference' => 'PY-TEST']);
+        $this->db->update('notifications', ['status' => 'sending', 'available_at' => $this->clock->nowString()], ['id' => $stuck]);
+
+        $this->travel('+10 minutes');
+        self::assertSame(0, $notifications->releaseStale());
+
+        $this->travel('+6 minutes');
+        self::assertSame(1, $notifications->releaseStale());
+        self::assertSame('queued', $this->row('notifications', 'id = ?', [$stuck])['status']);
+    }
+
+    public function testEachReminderIsQueuedOnce(): void
+    {
+        [$ref, $token, $id] = $this->book('INR');
+        $order = $this->pay($ref, $token, 'razorpay');
+        $this->captureWebhook($this->razorpay, $order['order_id'], 'evt_reminder');
+        self::assertSame(3, (int) $this->db->value("SELECT COUNT(*) FROM reminder_jobs WHERE appointment_id = ? AND status = 'pending'", [$id]));
+
+        $this->travel('+2 days 1 minute');
+        $reminders = $this->svc(ReminderService::class);
+        $reminders->processDue();
+        $reminders->processDue();
+
+        self::assertSame(1, (int) $this->db->value("SELECT COUNT(*) FROM notifications WHERE template_slug = 'appointment_reminder'"));
+        self::assertSame(1, (int) $this->db->value("SELECT COUNT(*) FROM reminder_jobs WHERE appointment_id = ? AND status = 'sent'", [$id]));
     }
 
     /** @return array{0: string, 1: string, 2: int} reference, access token, appointment id */

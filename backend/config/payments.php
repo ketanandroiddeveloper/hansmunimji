@@ -11,6 +11,9 @@ $currencies = static function (string $key, string $default): array {
 };
 
 return [
+    // Declares whether this environment is meant to take payments. Gateways still activate only when
+    // their credentials are set; `deploy:check` refuses a mismatch in either direction.
+    'enabled' => Env::bool('PAYMENTS_ENABLED', true),
     // Currencies are only offered through a gateway once the merchant account is confirmed to accept
     // them (Razorpay international payments and Stripe presentment currencies need activation).
     'razorpay' => [

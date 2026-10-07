@@ -29,6 +29,7 @@ const PractitionerPage = lazy(() => import('./pages/PractitionerPage'))
 const MediaPage = lazy(() => import('./pages/MediaPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const IntegrationsPage = lazy(() => import('./pages/IntegrationsPage'))
+const GoogleIntegrationPage = lazy(() => import('./pages/GoogleIntegrationPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AuditLogPage = lazy(() => import('./pages/AuditLogPage'))
 
@@ -96,6 +97,7 @@ export default function AdminApp() {
                   <Route path="media" element={<Guard permission="media.manage"><MediaPage /></Guard>} />
                   <Route path="settings" element={<Guard permission="settings.manage"><SettingsPage /></Guard>} />
                   <Route path="integrations" element={<Guard permission="integrations.manage"><IntegrationsPage /></Guard>} />
+                  <Route path="settings/integrations/google" element={<Guard permission="integrations.manage"><GoogleIntegrationPage /></Guard>} />
                   <Route path="users" element={<Guard permission="users.manage"><UsersPage /></Guard>} />
                   <Route path="audit-log" element={<Guard permission="audit.view"><AuditLogPage /></Guard>} />
                   {RESOURCES.flatMap((def) => [

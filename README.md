@@ -59,10 +59,10 @@ Implemented and tested locally: applications, appointment booking with holds and
 
 Outstanding before the platform can be called fully functional:
 
-1. **Payment credentials and accounts.** Razorpay and Stripe keys and webhook secrets for staging (test) and production (live); webhooks registered; `RAZORPAY_CURRENCIES` / `STRIPE_CURRENCIES` set to what each account actually supports (non-INR on Razorpay needs International Payments). Payment flows have **not** yet been run against real gateway sandboxes. See the checklist in [integrations.md](docs/integrations.md#go-live-prerequisites).
-2. **Google Calendar / Meet.** An OAuth client, consent-screen verification for the calendar scope, and an admin connecting the calendar. Until then, Meet links are not generated automatically.
+1. **Payment credentials and accounts.** Razorpay is the only active gateway; Stripe is disabled because there is no Stripe account for India. Still needed: live Razorpay keys (after KYC and website approval), a live webhook, and International Payments approval before `RAZORPAY_CURRENCIES` lists anything other than INR. A complete Razorpay test-mode payment has not been confirmed yet. See [integrations.md](docs/integrations.md#go-live-prerequisites).
+2. **Google Workspace (Gmail, Calendar, Meet).** The code is in place. Still needed: an OAuth client ID and secret in the server environment, the consent screen published (or the account added as a test user, which means reconnecting every 7 days), and an admin pressing **Connect Google** under Admin → Integrations → Google Workspace. Until then, Meet links and calendar invitations are not created and email uses the SMTP or log driver.
 3. **Email.** SMTP credentials and a verified sending domain.
-4. **Deployment.** Servers, TLS, secrets, worker and cron as described in [deployment.md](docs/deployment.md), including migration `000008`, which fixes refunds failing to save.
+4. **Deployment.** Production is cPanel shared hosting at https://www.hansterahiansh.com. The release kit is in `deploy/`, and the procedure (SSL, database, secrets, cron, rollback) is in [deployment.md](docs/deployment.md#0-production-on-cpanel).
 5. **Content.** The practitioner name "Hansmuniji" is an assumption. The biography and qualifications are empty and must be entered in the admin from verifiable sources. Legal pages (privacy, terms, cancellation and refund, cookies) need review by a qualified professional; nothing here claims legal or regulatory compliance.
 6. **Images.** Several session photographs show a second person; confirm their consent before publishing.
 7. **Demo data.** Local seed data, including event prices, consists of placeholders and must not be deployed as real offers.

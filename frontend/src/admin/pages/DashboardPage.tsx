@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { formatMoney } from '../../lib/format'
 import { adminApi } from '../lib/adminApi'
 import { formatAdminDateTime } from '../lib/datetime'
+import { GOOGLE_PAGE } from '../lib/integrations'
 import { APPOINTMENT_STATUS, FORMAT_LABEL, labelOf } from '../lib/labels'
 import { useSession } from '../lib/session'
 import { Badge, ErrorNote, Notice, PageHeader, Panel, Spinner, Stat } from '../ui/Primitives'
@@ -11,10 +12,23 @@ interface Dashboard {
   upcoming?: { id: number; reference: string; status: string; starts_at: string; format: string; type_title: string; client_name: string | null }[]
   counts?: { today?: number; needs_attention?: number; pending_payment?: number; applications_new?: number; applications_in_review?: number }
   revenue_30d?: { currency: string; net_minor: string | number; count: string | number }[]
-  health?: { google_calendar: 'connected' | 'not_connected' | 'not_configured'; failed_jobs: number; failed_emails: number; failed_webhooks: number }
+  health?: { google_calendar: 'connected' | 'not_connected' | 'not_configured' | 'needs_reauth' | 'missing_permission'; failed_jobs: number; failed_emails: number; failed_webhooks: number }
 }
 
-const GOOGLE: Record<string, string> = { connected: 'Connected', not_connected: 'Not connected', not_configured: 'Not configured' }
+const GOOGLE: Record<string, string> = {
+  connected: 'connected',
+  not_connected: 'not connected',
+  not_configured: 'not configured',
+  needs_reauth: 'disconnected because access was revoked or expired',
+  missing_permission: 'connected without every required permission',
+}
+const GOOGLE_BADGE: Record<string, string> = {
+  connected: 'Connected',
+  not_connected: 'Not connected',
+  not_configured: 'Not configured',
+  needs_reauth: 'Reconnect required',
+  missing_permission: 'Permission missing',
+}
 
 export default function DashboardPage() {
   const { user } = useSession()
@@ -35,9 +49,9 @@ export default function DashboardPage() {
       {d.health && (healthIssues > 0 || d.health.google_calendar !== 'connected') && (
         <div className="mb-6">
           <Notice tone="warn">
-            {d.health.google_calendar !== 'connected' && <>Google Calendar is {GOOGLE[d.health.google_calendar].toLowerCase()}, so Meet links and calendar invitations are not being created. </>}
+            {d.health.google_calendar !== 'connected' && <>Google Workspace is {GOOGLE[d.health.google_calendar]}, so calendar invitations, Meet links or Gmail messages may not be sent. </>}
             {healthIssues > 0 && <>There are {healthIssues} failed background tasks in the last 7 days. </>}
-            <Link to="/admin/integrations" className="underline underline-offset-4">
+            <Link to={d.health.google_calendar !== 'connected' ? GOOGLE_PAGE : '/admin/integrations'} className="underline underline-offset-4">
               Review integrations
             </Link>
           </Notice>
@@ -99,8 +113,8 @@ export default function DashboardPage() {
             <Panel title="System health">
               <ul className="space-y-2 text-sm font-light">
                 <li className="flex justify-between">
-                  <span className="text-slate-400">Google Calendar</span>
-                  <Badge tone={d.health.google_calendar === 'connected' ? 'green' : 'red'}>{GOOGLE[d.health.google_calendar]}</Badge>
+                  <span className="text-slate-400">Google Workspace</span>
+                  <Badge tone={d.health.google_calendar === 'connected' ? 'green' : 'red'}>{GOOGLE_BADGE[d.health.google_calendar]}</Badge>
                 </li>
                 <li className="flex justify-between">
                   <span className="text-slate-400">Failed jobs (7 days)</span>

@@ -7,6 +7,138 @@ Two deployables:
 
 The recommended layout serves both from one HTTPS origin: the web server serves the SPA and proxies `/api/v1`, `/sitemap.xml`, `/robots.txt` and `/media` to PHP. The admin session cookie then stays first-party, and the frontend needs no `VITE_API_BASE`.
 
+**Production (https://www.hansterahiansh.com) runs on BigRock cPanel shared hosting (Apache + PHP).** Follow [section 0](#0-production-on-cpanel). Sections 4 and 5 (Nginx, systemd) apply only to a VPS.
+
+## 0. Production on cPanel
+
+Nothing here needs Node.js on the server: the frontend is built locally into static files. The deploy kit lives in `deploy/`: `build-release.sh`, `cpanel/activate.sh`, `cpanel/rollback.sh`, `cpanel/env.production.template` and the `cpanel/public_html/` web-root files.
+
+### Layout (account home directory)
+
+```
+~/public_html/                    web root: SPA build, .htaccess, api.php, .user.ini, media → shared/storage/public
+~/advisory/releases/<name>/       one directory per release (backend + public_html + deploy scripts)
+~/advisory/current                symlink to the live release
+~/advisory/shared/.env.production secrets, chmod 600 (never under public_html)
+~/advisory/shared/storage/        logs, uploads, private audio: kept across releases
+~/advisory/backups/               database dump and web-root archive taken before every activation
+```
+
+`public_html/.htaccess` forces HTTPS on `www.hansterahiansh.com`, sends `/api/*`, `/sitemap.xml` and `/robots.txt` to `api.php`, and serves everything else as the SPA. It also sets the security headers (CSP allowing Razorpay Checkout), blocks dotfiles, source maps and executable files under `/media`, and leaves `/.well-known/` reachable for AutoSSL. `api.php` sets `APP_ENV=production` and `ENV_PATH=~/advisory/shared`, then loads `~/advisory/current/backend/public/index.php`.
+
+### The production server (BigRock, confirmed 7 Oct 2026)
+
+| Item | Value |
+| --- | --- |
+| SSH | `hanstebd@sh00020.bigrock.com` (IP `66.116.229.124`), port 22, key authentication only. Host key ED25519 `SHA256:TLlxkQ54o4w8+9CKifyBlxxJU169oNa8+2B6RaIS/DM` |
+| Home directory | `/home2/hanstebd` (not `/home`) |
+| PHP | the domain runs `ea-php84` (LSAPI); the default `php` CLI is 8.3. `activate.sh` reads the version from cPanel's handler block in `.htaccess` and uses `/usr/local/bin/ea-php84`, and the cron jobs call it explicitly |
+| Database | Percona Server 8.0.46. Database `hanstebd_hansterahiansh`; app user `hanstebd_app` (SELECT, INSERT, UPDATE, DELETE), migration user `hanstebd_mig` (ALL on that database). The older user `hanstebd_hansterahiansh` is not used |
+| Mail | `noreply@hansterahiansh.com` sends (SMTP on `mail.hansterahiansh.com:465`); `MAIL_REPLY_TO` and `MAIL_ADMIN_ADDRESS` are `info@hansterahiansh.com` |
+| SSL | Let's Encrypt for `hansterahiansh.com` and `*.hansterahiansh.com` (AutoSSL renews it) |
+| Web root | `public_html` must stay readable by Apache: owner `hanstebd`, group `nobody`, mode 750 (cPanel's default, which cPanel restores itself). If the group is ever lost, mode 755 is the fallback the account can set; deploys no longer change the group. `public_html/test_user` is an FTP account's home and is never touched by a deploy; the cPanel PHP handler block in `.htaccess` is kept on every publish |
+
+### Server requirements to confirm in cPanel (once)
+
+| Item | Where | Needed |
+| --- | --- | --- |
+| PHP version for the domain | MultiPHP Manager | 8.2 or newer, with `openssl`, `pdo_mysql`, `mbstring`, `gd`, `fileinfo`, `curl` (PHP Extensions / `php -m`). The handler must run PHP as the account user (PHP-FPM, suPHP or LSAPI) |
+| PHP CLI for cron and SSH | Terminal: `php -v`, or `/opt/cpanel/ea-php82/root/usr/bin/php` | same version as the domain; set `PHP_BIN` if `php` differs |
+| Database server | phpMyAdmin home page, or `deploy:check` | **MySQL 8.0 or newer**. The schema uses `utf8mb4_0900_ai_ci` and `SKIP LOCKED`; MariaDB and MySQL 5.7 are not supported |
+| SSL | SSL/TLS Status → Run AutoSSL | valid certificate for `hansterahiansh.com` and `www.hansterahiansh.com` |
+| Shell access | SSH Access / Terminal | needed to run `activate.sh` and to create the first admin |
+| Cron | Cron Jobs | every-minute jobs allowed |
+
+### One-time setup
+
+1. **SSL:** run AutoSSL for `hansterahiansh.com` and `www`, and wait until both certificates are valid.
+2. **Database:** cPanel → MySQL Databases. Create the database (e.g. `<user>_advisory`) and two users: an application user with SELECT, INSERT, UPDATE and DELETE, and a migration user with ALL PRIVILEGES on that database only. Generate both passwords with cPanel's generator.
+3. **Mailbox:** `info@hansterahiansh.com` (cPanel → Email Accounts). Its password goes into `MAIL_PASSWORD`.
+4. **Environment file:** upload `deploy/cpanel/env.production.template` to `~/advisory/shared/.env.production` and run `chmod 600` on it. Fill in every blank value on the server itself, typing or pasting each secret from its source (cPanel, Razorpay Dashboard, Google Cloud Console). Generate the application keys there with `php bin/console keys:generate` (from an extracted release's `backend/`), and keep a copy of the keys in a password manager.
+5. **Razorpay (Live mode):** Razorpay creates live keys only after it has approved the website, so go live in two phases:
+   * **Phase 1:** deploy with `PAYMENTS_ENABLED=false` and the Razorpay values empty. The site, private requests and free bookings work; paid sessions and gatherings say online payment is unavailable. Then submit `https://www.hansterahiansh.com` under Account & Settings → Websites & API keys, once the pricing, contact and policy pages are published.
+   * **Phase 2 (after approval):** generate live keys, then create a webhook at `https://www.hansterahiansh.com/api/v1/payments/razorpay/webhook` with a new secret and the events `payment.captured`, `payment.failed`, `order.paid`, `refund.processed` and `refund.failed`. Set `PAYMENTS_ENABLED=true`, fill in the three Razorpay values, and run `activate.sh` again (or just `deploy:check` and `payments:check`).
+6. **Google:** add the production redirect URI `https://www.hansterahiansh.com/api/v1/admin/integrations/google/callback` to the OAuth client, and publish the consent screen ([integrations.md](integrations.md#2-google-workspace-gmail-calendar-and-meet)).
+
+### Each release
+
+```bash
+# Local machine, from a clean, committed working tree
+deploy/build-release.sh          # runs the tests, lint, typecheck and production build, scans for secrets,
+                                 # and writes build/advisory-<stamp>-<commit>.tar.gz plus a .sha256 file
+
+# Upload the archive to ~/advisory/incoming/ (scp/rsync over SSH, or File Manager), then on the server:
+cd ~/advisory/incoming && sha256sum -c advisory-<…>.tar.gz.sha256 && tar -xzf advisory-<…>.tar.gz
+advisory-<…>/deploy/activate.sh                       # preflight, backups; lists pending migrations and stops
+CONFIRM_MIGRATIONS=1 ~/advisory/releases/advisory-<…>/deploy/activate.sh   # after reviewing them: migrate, seed, go live
+```
+
+`activate.sh` changes nothing until every check passes. In order, it:
+
+* runs `deploy:check` (PHP, extensions, MySQL version, storage, every required variable by name) and `payments:check` (live Razorpay credentials);
+* dumps the database and archives the current web root into `~/advisory/backups/`;
+* shows any pending migrations and applies them only with `CONFIRM_MIGRATIONS=1`;
+* runs the idempotent `db:seed`;
+* switches the `current` symlink and publishes the web root, keeping `.well-known`, `cgi-bin` and `media`;
+* calls `/api/v1/health` and the home page.
+
+**First administrator** (once, on the server):
+
+```bash
+cd ~/advisory/current/backend && APP_ENV=production ENV_PATH=~/advisory/shared /usr/local/bin/ea-php84 bin/console admin:create --email=<owner email> --name="<name>"
+```
+
+The password is typed at the prompt and never shown. Sign in at `/admin` and enrol two-factor authentication.
+
+### Cron (cPanel → Cron Jobs, every minute)
+
+Shared hosting does not allow a supervised long-running worker, so the worker runs one pass a minute. Emails therefore leave within about a minute.
+
+```
+* * * * * cd /home2/hanstebd/advisory/current/backend && APP_ENV=production ENV_PATH=/home2/hanstebd/advisory/shared /usr/local/bin/ea-php84 bin/console schedule:run >> /home2/hanstebd/advisory/shared/storage/logs/cron.log 2>&1
+* * * * * cd /home2/hanstebd/advisory/current/backend && APP_ENV=production ENV_PATH=/home2/hanstebd/advisory/shared /usr/local/bin/ea-php84 bin/console worker --once >> /home2/hanstebd/advisory/shared/storage/logs/cron.log 2>&1
+```
+
+These are installed on the production account (`crontab -l`).
+
+Use the full PHP CLI path if `php` on the server is not the 8.2+ binary. Overlapping runs are safe: queued emails and jobs are claimed with row locks, each reminder is claimed before it is queued, and emails left in `sending` by a killed process are re-queued after 15 minutes.
+
+### Rollback
+
+* **Code and web root:** `~/advisory/current/deploy/rollback.sh` lists releases, and `rollback.sh <release>` switches to one. It preserves the logs, leaves the database alone and checks `/api/v1/health`. Migrations are additive, so the previous release runs on the newer schema.
+* **First deployment** (no previous release): restore the archived web root with the command `activate.sh` prints (extract `~/advisory/backups/public_html-<stamp>.tar.gz` to a new directory, then `rsync -rlpt --delete` it over `~/public_html`).
+* **Database:** restore `~/advisory/backups/db-<stamp>.sql.gz` only if a release damaged data, after taking a fresh dump of the current state. Never restore automatically: a restore discards every booking and payment made since the dump.
+
+### Environment variables
+
+Server-only. The frontend build has no secrets: `VITE_APP_ENV` and `VITE_SITE_URL` are public and set by `build-release.sh`, and the Razorpay key ID reaches the browser only inside API responses.
+
+| Variable | Purpose | Required | Secret | Where it comes from |
+| --- | --- | --- | --- | --- |
+| `APP_ENV`, `APP_DEBUG` | `production`, `false` | yes | no | template (also forced by `api.php`) |
+| `APP_URL`, `FRONTEND_URL`, `ADMIN_URL`, `CORS_ALLOWED_ORIGINS` | `https://www.hansterahiansh.com` (+`/admin`) | yes | no | template |
+| `STORAGE_PATH` | `~/advisory/shared/storage` (absolute path) | yes | no | account home path |
+| `PRACTICE_TIMEZONE` | `Asia/Kolkata` | yes | no | template |
+| `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` | application database user | yes | no | cPanel → MySQL Databases |
+| `DB_PASSWORD` | application user password | yes | **yes** | cPanel → MySQL Databases |
+| `DB_MIGRATION_USERNAME`, `DB_MIGRATION_PASSWORD` | DDL user for `migrate` | recommended | password **yes** | cPanel → MySQL Databases |
+| `APP_KEY`, `BLIND_INDEX_KEY`, `ENCRYPTION_KEYS`, `ENCRYPTION_ACTIVE_KEY` | sessions, signed URLs, field encryption | yes | **yes** | `bin/console keys:generate` on the server |
+| `SESSION_SECURE_COOKIE`, `ADMIN_REQUIRE_TWO_FACTOR` | `true` (enforced) | yes | no | template |
+| `PAYMENTS_ENABLED` | `false` in phase 1, `true` once live keys exist | yes | no | template |
+| `RAZORPAY_KEY_ID` | live key ID `rzp_live_…` (public identifier) | phase 2 | no | Razorpay Live → API keys |
+| `RAZORPAY_KEY_SECRET` | live key secret | phase 2 | **yes** | Razorpay Live → API keys (shown once) |
+| `RAZORPAY_WEBHOOK_SECRET` | live webhook signature secret | phase 2 | **yes** | the value set when creating the live webhook |
+| `RAZORPAY_CURRENCIES` | `INR` (more only after International Payments approval) | yes | no | template |
+| `STRIPE_*` | disabled: leave empty | no | — | — |
+| `GOOGLE_CLIENT_ID` | OAuth web client | yes | no | Google Cloud → Credentials |
+| `GOOGLE_CLIENT_SECRET` | OAuth web client secret | yes | **yes** | Google Cloud → Credentials |
+| `GOOGLE_REDIRECT_URI` | `https://www.hansterahiansh.com/api/v1/admin/integrations/google/callback` | yes | no | template |
+| `GOOGLE_CALENDAR_ID`, `GOOGLE_ACCOUNT_EMAIL` | `primary`, `hansterahiansh@gmail.com` | yes | no | template |
+| `MAIL_DRIVER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_ENCRYPTION`, `MAIL_USERNAME` | `smtp`, `mail.hansterahiansh.com`, `465`, `ssl`, `noreply@hansterahiansh.com` | yes | no | template |
+| `MAIL_REPLY_TO` | `info@hansterahiansh.com`, so client replies reach a monitored mailbox | recommended | no | template |
+| `MAIL_PASSWORD` | `info@` mailbox password | yes (smtp) | **yes** | cPanel → Email Accounts |
+| `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME`, `MAIL_ADMIN_ADDRESS` | sender and operations address | yes | no | template |
+
 ## 1. Environments
 
 | | Staging | Production |
@@ -63,6 +195,19 @@ sudo systemctl restart advisory-worker
 * Migrations `2026_10_04_000007_booking_payment_lifecycle` and `2026_10_04_000008_refund_idempotency_key_length` must run. **000008 fixes a defect**: refund idempotency keys were longer than the `refunds.idempotency_key` column, so automatic and admin refunds failed to save. Deploy it before any refund is attempted.
 * New admin settings with safe defaults: `payments.country_routing`, `booking.unpaid_expiry_hours`, `events.auto_promote_waitlist`, `events.waitlist_offer_hours`, `events.reminder_offsets_minutes`. Review them in Admin → Settings.
 * Webhook URLs: `/api/v1/payments/stripe/webhook` and `/api/v1/payments/razorpay/webhook`. The earlier `/payments/webhook/{gateway}` paths still work.
+* **Stripe defect fixed:** the Stripe client was created with an option that `stripe/stripe-php` v16 rejects, so every Stripe API call (checkout, verification, refunds, `payments:check`) would have failed. Any Stripe SDK error now surfaces as a "provider unavailable" response instead of a server error.
+* Google Workspace:
+  * Migration `2026_10_06_000009_integration_logs` must run, and `db:seed` adds three admin email templates (payment received, payment failed, new event registration).
+  * The Google scopes now include `gmail.send`. An existing connection shows **Permission not granted** for Gmail until an admin reconnects.
+  * `MAIL_DRIVER=gmail` is accepted in production. Optional: `GOOGLE_ACCOUNT_EMAIL`.
+  * In production, `GOOGLE_REDIRECT_URI` must use HTTPS.
+  * The OAuth callback now returns to `/admin/settings/integrations/google`.
+* Production hardening for shared hosting (no new migrations):
+  * `gmail.send` is requested only when `MAIL_DRIVER=gmail`.
+  * Emails stuck in `sending` are re-queued by `schedule:run` after 15 minutes.
+  * Appointment reminders are claimed atomically, so overlapping cron runs can't send one twice.
+  * New read-only commands `deploy:check` and `migrate:status`.
+  * A fresh database seeds `payments.routing` with Razorpay for every currency. Existing settings are not changed.
 
 ### First administrator
 
@@ -205,10 +350,10 @@ With prerendering, published content changes only reach the static HTML on the n
 ## 7. Go-live checklist
 
 - [ ] Production secrets injected; `APP_DEBUG=false`; HTTPS URLs for `APP_URL` and `FRONTEND_URL`.
-- [ ] Migrations applied (including 000008); `db:seed` run; first admin created with 2FA.
+- [ ] Migrations applied (including 000008 and 000009); `db:seed` run; first admin created with 2FA.
 - [ ] Razorpay and Stripe live keys, webhook secrets and `*_CURRENCIES` set; webhooks registered; `payments:check` passes ([integrations.md](integrations.md#go-live-prerequisites)).
 - [ ] The full payment checklist completed on staging in test mode.
-- [ ] Google OAuth client verified for the calendar scope; calendar connected in Admin → Integrations.
+- [ ] Google OAuth app published (homepage and privacy policy on the production domain; verification for `calendar.events` and `gmail.send` if Google asks); production redirect URI registered; Google connected in Admin → Integrations → Google Workspace; Test Gmail, Test Calendar and Test Meet pass.
 - [ ] SMTP configured; test email received.
 - [ ] Worker running under systemd; cron running every minute.
 - [ ] Practitioner biography, qualifications and legal pages entered in the admin and reviewed by a qualified person.

@@ -67,6 +67,9 @@ final class MediaService
         } else {
             throw HttpException::validation(['file' => ['Upload a JPEG, PNG, WebP or AVIF image, or an MP4/WebM video.']]);
         }
+        if ($disk === 'public') {
+            $this->makeWebReadable($dir);
+        }
 
         $id = $this->db->insert('media', [
             'uuid' => $uuid,
@@ -269,6 +272,22 @@ final class MediaService
     private function root(string $disk): string
     {
         return $this->config->get('app.storage_path') . '/' . ($disk === 'private' ? 'private/media' : 'public');
+    }
+
+    /**
+     * Public media is served by the web server directly, which can run as a different user from PHP
+     * (cPanel: Apache as "nobody", PHP as the account). Modes are set explicitly so a restrictive
+     * umask in the calling process (cron, deploy scripts) cannot hide the files.
+     */
+    private function makeWebReadable(string $dir): void
+    {
+        $root = rtrim($this->root('public'), '/');
+        for ($d = $dir; strlen($d) > strlen($root) && str_starts_with($d, $root . '/'); $d = dirname($d)) {
+            @chmod($d, 0755);
+        }
+        foreach (glob($dir . '/*') ?: [] as $file) {
+            @chmod($file, 0644);
+        }
     }
 
     private function ensureDir(string $dir): void

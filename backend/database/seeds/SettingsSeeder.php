@@ -27,7 +27,7 @@ final class SettingsSeeder
         'privacy.retention_rejected_days' => [180, false],
         'booking.max_reschedules' => [2, false],
         'reminders.schedule' => [[['minutes' => 1440, 'enabled' => true], ['minutes' => 60, 'enabled' => true]], false],
-        'payments.routing' => [['INR' => ['razorpay', 'stripe'], 'USD' => ['stripe'], 'AED' => ['stripe'], 'GBP' => ['stripe']], false],
+        'payments.routing' => [['INR' => ['razorpay'], 'USD' => ['razorpay'], 'AED' => ['razorpay'], 'GBP' => ['razorpay']], false],
         'payments.auto_refund_conflicts' => [true, false],
     ];
 

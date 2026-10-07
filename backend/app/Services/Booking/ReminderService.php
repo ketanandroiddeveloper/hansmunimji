@@ -92,16 +92,25 @@ final class ReminderService
                 continue;
             }
 
-            $email = (string) $this->crypto->decrypt($row['client_email_enc'], 'appointments.client_email');
-            $this->notifications->queue('appointment_reminder', $email, [
-                'name' => (string) $this->crypto->decrypt($row['client_name_enc'], 'appointments.client_name'),
-                'reference' => (string) $row['reference'],
-                'type_title' => (string) $row['type_title'],
-                'starts_at_local' => TimeFormatter::forClient((string) $row['starts_at'], (string) $row['client_timezone']),
-                'meet_url' => (string) ($this->crypto->decrypt($row['meet_url_enc'], 'appointments.meet_url') ?? ''),
-                'lead_time' => self::humanOffset((int) $row['offset_minutes']),
-            ], 'appointment', (int) $row['appointment_id']);
-            $this->db->update('reminder_jobs', ['status' => 'sent', 'sent_at' => $this->clock->nowString(), 'attempts' => (int) $row['attempts'] + 1], ['id' => $row['id']]);
+            // Overlapping workers (cron on shared hosting) may select the same row; only the claimant queues the email.
+            $this->db->transaction(function () use ($row): void {
+                $claimed = $this->db->run(
+                    "UPDATE reminder_jobs SET status = 'sent', sent_at = ?, attempts = attempts + 1 WHERE id = ? AND status = 'pending'",
+                    [$this->clock->nowString(), $row['id']],
+                )->rowCount();
+                if ($claimed !== 1) {
+                    return;
+                }
+                $email = (string) $this->crypto->decrypt($row['client_email_enc'], 'appointments.client_email');
+                $this->notifications->queue('appointment_reminder', $email, [
+                    'name' => (string) $this->crypto->decrypt($row['client_name_enc'], 'appointments.client_name'),
+                    'reference' => (string) $row['reference'],
+                    'type_title' => (string) $row['type_title'],
+                    'starts_at_local' => TimeFormatter::forClient((string) $row['starts_at'], (string) $row['client_timezone']),
+                    'meet_url' => (string) ($this->crypto->decrypt($row['meet_url_enc'], 'appointments.meet_url') ?? ''),
+                    'lead_time' => self::humanOffset((int) $row['offset_minutes']),
+                ], 'appointment', (int) $row['appointment_id']);
+            });
         }
 
         return count($due);

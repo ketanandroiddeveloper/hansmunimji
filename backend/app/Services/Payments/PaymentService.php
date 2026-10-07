@@ -517,6 +517,19 @@ final class PaymentService
         $type = (string) $payment['payable_type'];
         $payableId = (int) $payment['payable_id'];
 
+        if ($effect === 'confirmed' || $effect === 'failed') {
+            $this->notifications->queueAdmin($effect === 'confirmed' ? 'admin_payment_succeeded' : 'admin_payment_failed', [
+                'reference' => (string) $this->db->value(
+                    $type === 'appointment' ? 'SELECT reference FROM appointments WHERE id = ?' : 'SELECT reference FROM event_registrations WHERE id = ?',
+                    [$payableId],
+                ),
+                'payment_reference' => (string) $payment['reference'],
+                'amount' => TimeFormatter::money((int) $payment['amount_minor'], (string) $payment['currency']),
+                'gateway' => ucfirst((string) $payment['gateway']),
+                'kind' => $type === 'appointment' ? 'consultation' : 'event registration',
+            ], 'payment', (int) $payment['id']);
+        }
+
         if ($effect === 'confirmed') {
             if ($type === 'appointment') {
                 $appointment = $this->bookings->find($payableId);

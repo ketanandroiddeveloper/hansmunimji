@@ -18,6 +18,8 @@ use App\Services\TimeFormatter;
  */
 final class CalendarSyncService
 {
+    private const FORMATS = ['google_meet' => 'Google Meet', 'phone' => 'phone', 'in_person' => 'in person'];
+
     public function __construct(
         private Database $db,
         private Clock $clock,
@@ -32,8 +34,9 @@ final class CalendarSyncService
     public function sync(int $appointmentId): void
     {
         $appointment = $this->db->first(
-            'SELECT a.*, t.title AS type_title, c.name AS city_name FROM appointments a
-             JOIN appointment_types t ON t.id = a.appointment_type_id LEFT JOIN cities c ON c.id = a.city_id WHERE a.id = ?',
+            'SELECT a.*, t.title AS type_title, t.duration_minutes, s.title AS service_title, c.name AS city_name FROM appointments a
+             JOIN appointment_types t ON t.id = a.appointment_type_id LEFT JOIN services s ON s.id = t.service_id
+             LEFT JOIN cities c ON c.id = a.city_id WHERE a.id = ?',
             [$appointmentId],
         );
         if ($appointment === null) {
@@ -41,10 +44,20 @@ final class CalendarSyncService
         }
 
         $active = AppointmentStateMachine::isActive((string) $appointment['status']);
+        if ($active && !$this->google->isReady()) {
+            // Not connected (or Calendar access not granted): wait instead of burning retries.
+            // Connecting Google re-queues every pending upcoming booking.
+            $this->db->update('appointments', [
+                'calendar_sync_status' => 'pending',
+                'calendar_last_error' => 'Waiting for Google Calendar to be connected.',
+            ], ['id' => $appointmentId]);
+
+            return;
+        }
         try {
             if (!$active) {
                 if ($appointment['google_event_id']) {
-                    $this->google->cancelEvent((string) $appointment['google_event_id']);
+                    $this->google->cancelEvent((string) $appointment['google_event_id'], (string) $appointment['reference']);
                 }
 
                 return;
@@ -58,6 +71,7 @@ final class CalendarSyncService
                     Clock::iso((string) $appointment['starts_at']),
                     Clock::iso((string) $appointment['ends_at']),
                     (string) $appointment['client_timezone'],
+                    (string) $appointment['reference'],
                 )
                 : $this->google->createEvent($this->eventPayload($appointment));
 
@@ -106,16 +120,30 @@ final class CalendarSyncService
         ], 'appointment', $appointmentId);
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * Guests see the description too, so it carries booking logistics only — never application
+     * answers, notes or other confidential content. The Meet link is attached as conference data.
+     *
+     * @return array<string, mixed>
+     */
     private function eventPayload(array $appointment): array
     {
         $name = (string) $this->crypto->decrypt($appointment['client_name_enc'], 'appointments.client_name');
         $manage = $this->config->get('app.frontend_url') . '/consultation/' . $appointment['reference'];
+        $lines = array_filter([
+            $appointment['service_title'] ? 'Service: ' . $appointment['service_title'] : null,
+            'Appointment: ' . $appointment['type_title'] . ' (' . (int) $appointment['duration_minutes'] . ' minutes, ' . self::FORMATS[$appointment['format']] . ')',
+            'Client: ' . $name,
+            'Reference: ' . $appointment['reference'],
+            'Payment: ' . $this->paymentStatus($appointment),
+            $appointment['format'] === 'google_meet' ? 'Google Meet: use the “Join with Google Meet” link on this invitation.' : null,
+            'Manage booking: ' . $manage,
+        ]);
 
         return [
             'reference' => (string) $appointment['reference'],
             'summary' => $appointment['type_title'] . ' — ' . $name,
-            'description' => "Private consultation · Reference {$appointment['reference']}\nManage: {$manage}\n\nThis meeting is confidential.",
+            'description' => implode("\n", $lines) . "\n\nThis meeting is confidential.",
             'starts_at' => Clock::iso((string) $appointment['starts_at']),
             'ends_at' => Clock::iso((string) $appointment['ends_at']),
             'timezone' => (string) $appointment['client_timezone'],
@@ -125,5 +153,24 @@ final class CalendarSyncService
             'location' => $appointment['format'] === 'in_person' ? $appointment['city_name'] : null,
             'reminders' => $this->reminders->enabledOffsets(),
         ];
+    }
+
+    private function paymentStatus(array $appointment): string
+    {
+        $payment = $this->db->first(
+            "SELECT status FROM payments WHERE payable_type = 'appointment' AND payable_id = ? ORDER BY (status IN ('captured','partially_refunded')) DESC, id DESC LIMIT 1",
+            [$appointment['id']],
+        );
+        if ($payment === null) {
+            return (int) $appointment['amount_minor'] > 0 ? 'Not yet received' : 'No payment required';
+        }
+
+        return match ($payment['status']) {
+            'captured' => 'Paid',
+            'partially_refunded' => 'Paid (partially refunded)',
+            'refunded' => 'Refunded',
+            'reconciliation_required' => 'Received, under review',
+            default => 'Pending',
+        };
     }
 }

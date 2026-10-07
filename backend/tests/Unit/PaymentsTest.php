@@ -54,6 +54,54 @@ final class PaymentsTest extends TestCase
         $gateway->verifyClientPayload(['razorpay_order_id' => 'order_1', 'razorpay_payment_id' => 'pay_1', 'razorpay_signature' => hash_hmac('sha256', 'order_1|pay_1', 'fake_secret')]);
     }
 
+    public function testRazorpayReconciliationTreatsInProgressAttemptsAsPendingNotFailed(): void
+    {
+        $order = ['id' => 'order_1', 'amount' => 250000, 'currency' => 'INR'];
+        $gateway = $this->razorpay([
+            new Response(200, [], json_encode(['count' => 1, 'items' => [['id' => 'pay_1', 'status' => 'created', 'amount' => 250000, 'currency' => 'INR']]])),
+            new Response(200, [], json_encode($order)),
+        ]);
+
+        $result = $gateway->fetchByOrder('order_1');
+
+        self::assertSame(VerifiedPayment::PENDING, $result->status);
+        self::assertSame(250000, $result->amountMinor);
+    }
+
+    public function testRazorpayReconciliationCapturesAnAuthorizedPayment(): void
+    {
+        $history = [];
+        $stack = HandlerStack::create(new MockHandler([
+            new Response(200, [], json_encode(['count' => 2, 'items' => [
+                ['id' => 'pay_2', 'status' => 'authorized', 'amount' => 250000, 'currency' => 'INR'],
+                ['id' => 'pay_1', 'status' => 'failed', 'amount' => 250000, 'currency' => 'INR', 'error_description' => 'Declined'],
+            ]])),
+            new Response(200, [], json_encode(['id' => 'pay_2', 'status' => 'captured', 'amount' => 250000, 'currency' => 'INR'])),
+        ]));
+        $stack->push(\GuzzleHttp\Middleware::history($history));
+        $gateway = new RazorpayGateway(new Client(['handler' => $stack, 'http_errors' => false]), self::RZP);
+
+        $result = $gateway->fetchByOrder('order_1');
+
+        self::assertSame(VerifiedPayment::CAPTURED, $result->status);
+        self::assertSame('pay_2', $result->paymentId);
+        self::assertSame('POST', $history[1]['request']->getMethod());
+        self::assertStringEndsWith('payments/pay_2/capture', (string) $history[1]['request']->getUri());
+    }
+
+    public function testRazorpayReconciliationReportsFailureOnlyWhenEveryAttemptFailed(): void
+    {
+        $gateway = $this->razorpay([new Response(200, [], json_encode(['count' => 2, 'items' => [
+            ['id' => 'pay_2', 'status' => 'failed', 'amount' => 250000, 'currency' => 'INR', 'error_description' => 'Payment was cancelled at the bank.'],
+            ['id' => 'pay_1', 'status' => 'failed', 'amount' => 250000, 'currency' => 'INR'],
+        ]]))]);
+
+        $result = $gateway->fetchByOrder('order_1');
+
+        self::assertSame(VerifiedPayment::FAILED, $result->status);
+        self::assertSame('Payment was cancelled at the bank.', $result->failureReason);
+    }
+
     public function testRazorpayWebhookSignatureAndMapping(): void
     {
         $body = json_encode(['event' => 'payment.captured', 'payload' => ['payment' => ['entity' => ['id' => 'pay_9', 'order_id' => 'order_9', 'amount' => 5000, 'currency' => 'INR']]]]);

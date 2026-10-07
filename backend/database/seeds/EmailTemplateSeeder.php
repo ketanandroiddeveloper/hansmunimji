@@ -209,6 +209,24 @@ final class EmailTemplateSeeder
                 . self::p('Client details are available in the administration panel.'),
                 ['reference', 'type_title', 'starts_at_local']],
 
+            'admin_new_event_registration' => ['Admin — new event registration', 'New registration · {{event_title}}',
+                self::p('New registration <strong>{{reference}}</strong> for {{event_title}} on {{starts_at_local}}.')
+                . self::p('Status: {{status}}<br>Seats: {{seats}}')
+                . self::p('Guest details are available in the administration panel.'),
+                ['reference', 'event_title', 'starts_at_local', 'status', 'seats']],
+
+            'admin_payment_succeeded' => ['Admin — payment received', 'Payment received · {{reference}}',
+                self::p('A payment of <strong>{{amount}}</strong> was received via {{gateway}} for {{kind}} <strong>{{reference}}</strong>.')
+                . self::p('Payment reference: {{payment_reference}}')
+                . self::p('Details are available in the administration panel.'),
+                ['reference', 'payment_reference', 'amount', 'gateway', 'kind']],
+
+            'admin_payment_failed' => ['Admin — payment failed', 'Payment failed · {{reference}}',
+                self::p('A payment attempt of <strong>{{amount}}</strong> via {{gateway}} for {{kind}} <strong>{{reference}}</strong> failed.')
+                . self::p('Payment reference: {{payment_reference}}<br>The guest can retry from their secure booking link until the hold expires.')
+                . self::p('Details are available in the administration panel.'),
+                ['reference', 'payment_reference', 'amount', 'gateway', 'kind']],
+
             'admin_integration_failure' => ['Admin — integration failure', 'Action needed · {{integration}}',
                 self::p('An automated task needs attention.')
                 . self::p('Integration: <strong>{{integration}}</strong>{{#if reference}}<br>Reference: {{reference}}{{/if}}<br>Detail: {{error}}')

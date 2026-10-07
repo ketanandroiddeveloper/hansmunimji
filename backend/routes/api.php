@@ -174,6 +174,10 @@ return static function (Router $router): void {
             $r->get('/integrations', [Admin\IntegrationsController::class, 'index'], ['can:integrations.manage']);
             $r->post('/integrations/google/connect', [Admin\IntegrationsController::class, 'googleConnect'], ['can:integrations.manage']);
             $r->post('/integrations/google/disconnect', [Admin\IntegrationsController::class, 'googleDisconnect'], ['can:integrations.manage']);
+            $r->post('/integrations/google/test/gmail', [Admin\IntegrationsController::class, 'googleTestGmail'], ['can:integrations.manage', 'throttle:google_test,20,3600']);
+            $r->post('/integrations/google/test/calendar', [Admin\IntegrationsController::class, 'googleTestCalendar'], ['can:integrations.manage', 'throttle:google_test,20,3600']);
+            $r->post('/integrations/google/test/meet', [Admin\IntegrationsController::class, 'googleTestMeet'], ['can:integrations.manage', 'throttle:google_test,20,3600']);
+            $r->post('/integrations/google/test/cleanup', [Admin\IntegrationsController::class, 'googleCleanupTests'], ['can:integrations.manage', 'throttle:google_test,20,3600']);
             $r->post('/integrations/jobs/{id}/retry', [Admin\IntegrationsController::class, 'retryJob'], ['can:integrations.manage']);
             $r->post('/integrations/email/test', [Admin\IntegrationsController::class, 'sendTestEmail'], ['can:integrations.manage', 'throttle:test_email,5,3600']);
 

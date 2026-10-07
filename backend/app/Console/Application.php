@@ -8,6 +8,7 @@ use App\Core\Clock;
 use App\Core\Config;
 use App\Core\Container;
 use App\Core\Database;
+use App\Core\Env;
 use App\Core\Logger;
 use App\Core\Migrator;
 use App\Core\Router;
@@ -58,6 +59,8 @@ final class Application
     private const COMMANDS = [
         'migrate' => 'Run pending migrations (uses DB_MIGRATION_* credentials when set). --seed to seed afterwards.',
         'migrate:rollback' => 'Roll back the last batch of migrations (refused in production).',
+        'migrate:status' => 'List pending migrations without applying them. Exit code 2 when any are pending.',
+        'deploy:check' => 'Read-only release preflight: PHP, database version, storage, required settings. Prints names, never values.',
         'db:seed' => 'Seed reference data and initial content (idempotent; never overwrites edited content).',
         'admin:create' => 'Create an administrator interactively: --email= --name= [--role=super-admin] [--password-stdin].',
         'keys:generate' => 'Print fresh APP_KEY, BLIND_INDEX_KEY and an ENCRYPTION_KEYS entry for a secrets manager.',
@@ -82,6 +85,8 @@ final class Application
             return match ($command) {
                 'migrate' => $this->migrate($options),
                 'migrate:rollback' => $this->rollback(),
+                'migrate:status' => $this->migrationStatus(),
+                'deploy:check' => $this->deployCheck(),
                 'db:seed' => $this->seed(),
                 'admin:create' => $this->createAdmin($options),
                 'keys:generate' => $this->generateKeys(),
@@ -125,6 +130,119 @@ final class Application
         $this->line($rolled === [] ? 'Nothing to roll back.' : 'Rolled back: ' . implode(', ', $rolled));
 
         return 0;
+    }
+
+    private function migrationStatus(): int
+    {
+        $db = Database::connect($this->config()->get('database'), asMigrator: true);
+        $pending = (new Migrator($db, $this->basePath() . '/database/migrations'))->pending();
+        $this->line($pending === [] ? 'No pending migrations.' : "Pending:\n  " . implode("\n  ", $pending));
+
+        return $pending === [] ? 0 : 2;
+    }
+
+    /** Every check prints a setting or variable NAME on failure, never its value. */
+    private function deployCheck(): int
+    {
+        $config = $this->config();
+        $failures = [];
+        $warnings = [];
+
+        if (PHP_VERSION_ID < 80200) {
+            $failures[] = 'PHP 8.2 or newer is required (CLI is ' . PHP_VERSION . ').';
+        }
+        foreach (['openssl', 'pdo_mysql', 'mbstring', 'gd', 'fileinfo', 'json', 'curl'] as $extension) {
+            if (!extension_loaded($extension)) {
+                $failures[] = "PHP extension '{$extension}' is not loaded.";
+            }
+        }
+
+        $required = ['APP_URL' => 'app.url', 'FRONTEND_URL' => 'app.frontend_url', 'DB_DATABASE' => 'database.database', 'DB_USERNAME' => 'database.username', 'MAIL_FROM_ADDRESS' => 'mail.from_address'];
+        if ($config->get('mail.driver') === 'smtp') {
+            $required += ['MAIL_HOST' => 'mail.host', 'MAIL_USERNAME' => 'mail.username', 'MAIL_PASSWORD' => 'mail.password'];
+        }
+        foreach (['MAIL_FROM_ADDRESS' => 'mail.from_address', 'MAIL_REPLY_TO' => 'mail.reply_to', 'MAIL_ADMIN_ADDRESS' => 'mail.admin_address'] as $name => $key) {
+            $address = (string) $config->get($key, '');
+            if ($address !== '' && filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+                $failures[] = "{$name} is not a valid email address.";
+            }
+        }
+        $razorpay = [
+            'RAZORPAY_KEY_ID' => 'payments.razorpay.key_id',
+            'RAZORPAY_KEY_SECRET' => 'payments.razorpay.key_secret',
+            'RAZORPAY_WEBHOOK_SECRET' => 'payments.razorpay.webhook_secret',
+        ];
+        if ($config->get('payments.enabled')) {
+            if ($config->isProduction()) {
+                $required += $razorpay;
+            }
+        } else {
+            $warnings[] = 'PAYMENTS_ENABLED=false: paid appointments and gatherings cannot be booked online.';
+            foreach ($razorpay + ['STRIPE_SECRET_KEY' => 'payments.stripe.secret_key'] as $name => $key) {
+                if ((string) $config->get($key, '') !== '') {
+                    $failures[] = "{$name} is set while PAYMENTS_ENABLED=false. Remove it, or set PAYMENTS_ENABLED=true.";
+                }
+            }
+        }
+        if ($config->isProduction()) {
+            $required += [
+                'GOOGLE_CLIENT_ID' => 'google.client_id',
+                'GOOGLE_CLIENT_SECRET' => 'google.client_secret',
+                'GOOGLE_REDIRECT_URI' => 'google.redirect_uri',
+                'MAIL_ADMIN_ADDRESS' => 'mail.admin_address',
+            ];
+        }
+        foreach ($required as $name => $key) {
+            if ((string) $config->get($key, '') === '') {
+                $failures[] = "{$name} is not set.";
+            }
+        }
+        if ((string) $config->get('database.password', '') === '' && (string) $config->get('database.socket', '') === '') {
+            $warnings[] = 'DB_PASSWORD is empty.';
+        }
+        if (!in_array($config->get('app.frontend_url'), (array) $config->get('app.cors_allowed_origins', []), true)) {
+            $failures[] = 'CORS_ALLOWED_ORIGINS must include FRONTEND_URL.';
+        }
+        $host = (string) parse_url((string) $config->get('app.url'), PHP_URL_HOST);
+        $redirect = (string) $config->get('google.redirect_uri');
+        if ($redirect !== '' && parse_url($redirect, PHP_URL_HOST) !== $host) {
+            $failures[] = 'GOOGLE_REDIRECT_URI must use the APP_URL host.';
+        }
+        if (Env::string('STRIPE_SECRET_KEY') === '' && Env::string('STRIPE_WEBHOOK_SECRET') !== '') {
+            $warnings[] = 'STRIPE_WEBHOOK_SECRET is set but Stripe is disabled.';
+        }
+
+        $storage = (string) $config->get('app.storage_path');
+        foreach (['logs', 'cache', 'public', 'private'] as $dir) {
+            if (!is_dir("{$storage}/{$dir}") || !is_writable("{$storage}/{$dir}")) {
+                $failures[] = "Storage directory '{$dir}' is missing or not writable (STORAGE_PATH).";
+            }
+        }
+
+        try {
+            $db = Database::connect($config->get('database'));
+            $version = (string) $db->value('SELECT VERSION()');
+            $this->line("Database server: {$version}");
+            if (stripos($version, 'mariadb') !== false || version_compare(preg_replace('/[^0-9.].*$/', '', $version), '8.0.0', '<')) {
+                $failures[] = 'MySQL 8.0 or newer is required (utf8mb4_0900_ai_ci collation, SKIP LOCKED).';
+            }
+            if (!$db->value("SHOW COLLATION LIKE 'utf8mb4_0900_ai_ci'")) {
+                $failures[] = "The database server lacks the utf8mb4_0900_ai_ci collation.";
+            }
+        } catch (\Throwable $e) {
+            $failures[] = 'Cannot connect to the database with DB_* settings (' . get_class($e) . ').';
+        }
+
+        $this->line('Environment: ' . $config->environment() . ' · mail driver: ' . $config->get('mail.driver'));
+        foreach ($warnings as $warning) {
+            $this->line("warning: {$warning}");
+        }
+        foreach ($failures as $failure) {
+            $this->error("FAIL: {$failure}");
+        }
+        $this->line($failures === [] ? 'Preflight passed.' : count($failures) . ' check(s) failed.');
+
+        return $failures === [] ? 0 : 1;
     }
 
     private function seed(): int
@@ -311,6 +429,11 @@ final class Application
                     'job:' . hash('sha256', $p['payment_id'] . '|' . $p['amount_minor'] . '|' . $p['reason']),
                 );
             },
+            'google.reauth_alert' => static fn () => $c->get(NotificationService::class)->queueAdmin('admin_integration_failure', [
+                'integration' => 'Google Workspace',
+                'reference' => null,
+                'error' => 'Google access was revoked or has expired. Calendar events, Meet links and Gmail sending are paused until Google is reconnected.',
+            ]),
             'frontend.rebuild' => static function () use ($c): void {
                 $url = (string) $c->get(Config::class)->get('app.rebuild_hook_url');
                 if ($url === '') {
@@ -357,6 +480,7 @@ final class Application
         $results['event_reminders'] = $registrations->sendReminders();
         $results['applications_retention'] = $c->get(ApplicationService::class)->applyRetention();
         $results['stale_jobs_released'] = $c->get(JobQueue::class)->releaseStale();
+        $results['stale_emails_released'] = $c->get(NotificationService::class)->releaseStale();
         $db->run(
             "UPDATE appointment_slots s JOIN appointments a ON a.id = s.appointment_id
              SET s.status = 'released', s.held_until = NULL, s.updated_at = ?
@@ -371,6 +495,7 @@ final class Application
         // Delivered notification payloads (which contain personal data) are purged after 30 days.
         $db->run("DELETE FROM notifications WHERE status IN ('sent','cancelled') AND created_at < ?", [$clock->now()->modify('-30 days')->format('Y-m-d H:i:s')]);
         $db->run("DELETE FROM jobs WHERE status = 'done' AND finished_at < ?", [$clock->now()->modify('-14 days')->format('Y-m-d H:i:s')]);
+        $db->run('DELETE FROM integration_logs WHERE created_at < ?', [$clock->now()->modify('-90 days')->format('Y-m-d H:i:s')]);
 
         $this->line(json_encode($results, JSON_THROW_ON_ERROR));
 

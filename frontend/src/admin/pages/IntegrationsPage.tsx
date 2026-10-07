@@ -1,76 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
-import type { ReactNode } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link } from 'react-router'
 import { adminApi, errorMessage } from '../lib/adminApi'
 import { formatAdminDateTime } from '../lib/datetime'
-import { humanizeSlug } from '../lib/labels'
-import { useConfirm } from '../ui/Dialog'
+import { GOOGLE_PAGE, INTEGRATIONS_KEY } from '../lib/integrations'
+import type { Integrations } from '../lib/integrations'
+import { Copyable } from '../ui/Copyable'
 import { AButton, Badge, DataTable, ErrorNote, KeyValues, Notice, PageHeader, Panel, Spinner, Stat, TableMessage, Td, Th } from '../ui/Primitives'
 import { useToast } from '../ui/Toast'
 
-interface Integrations {
-  environment: string
-  google_calendar: { configured: boolean; status: 'connected' | 'needs_reauth' | 'disconnected'; account_email: string | null; calendar_id: string | null; last_error: string | null; last_synced_at: string | null; redirect_uri: string | null }
-  payments: Record<string, { configured: boolean; mode: 'live' | 'test' | 'unconfigured'; currencies: string[]; webhook_url: string }>
-  email: { configured: boolean; driver: string }
-  frontend_rebuild: { configured: boolean }
-  queues: { jobs_pending: number; jobs_failed: number; emails_queued: number; emails_failed: number }
-  failed_jobs: { id: number; type: string; attempts: number; last_error: string | null; finished_at: string | null }[]
-}
-
-const GOOGLE_RESULT: Record<string, { tone: 'success' | 'error'; text: string }> = {
-  connected: { tone: 'success', text: 'Google Calendar connected. Upcoming bookings are being synced.' },
-  invalid_state: { tone: 'error', text: 'The Google sign-in link expired or was invalid. Please try connecting again.' },
-  unauthorized: { tone: 'error', text: 'Your session or permissions changed during sign-in. Please sign in and try again.' },
-  denied: { tone: 'error', text: 'Access was not granted in Google. The calendar is not connected.' },
-  failed: { tone: 'error', text: 'Google could not complete the connection. Check the OAuth configuration and try again.' },
-}
-
 const GATEWAY_NAME: Record<string, string> = { razorpay: 'Razorpay', stripe: 'Stripe' }
-
-function Copyable({ value }: { value: string }) {
-  const notify = useToast()
-  return (
-    <span className="flex items-center gap-2">
-      <code className="min-w-0 break-all font-mono text-xs text-ivory-200">{value}</code>
-      <button
-        type="button"
-        className="shrink-0 text-[0.6rem] uppercase tracking-[0.16em] text-champagne-200 hover:underline"
-        onClick={() => navigator.clipboard.writeText(value).then(() => notify('Copied.'), () => notify('Could not copy.', 'error'))}
-      >
-        Copy
-      </button>
-    </span>
-  )
-}
 
 export default function IntegrationsPage() {
   const notify = useToast()
-  const confirm = useConfirm()
   const client = useQueryClient()
-  const [params, setParams] = useSearchParams()
-  const googleResult = GOOGLE_RESULT[params.get('google') ?? '']
-  const data = useQuery({ queryKey: ['admin', 'integrations'], queryFn: () => adminApi.get<Integrations>('/admin/integrations') })
+  const data = useQuery({ queryKey: INTEGRATIONS_KEY, queryFn: () => adminApi.get<Integrations>('/admin/integrations') })
 
-  useEffect(() => {
-    if (params.get('google') === 'connected') client.invalidateQueries({ queryKey: ['admin', 'dashboard'] })
-  }, [params, client])
-
-  const refresh = () => client.invalidateQueries({ queryKey: ['admin', 'integrations'] })
-  const connect = useMutation({
-    mutationFn: () => adminApi.post<{ authorization_url: string }>('/admin/integrations/google/connect'),
-    onSuccess: (r) => window.location.assign(r.authorization_url),
-    onError: (e) => notify(errorMessage(e), 'error'),
-  })
-  const disconnect = useMutation({
-    mutationFn: () => adminApi.post('/admin/integrations/google/disconnect'),
-    onSuccess: () => {
-      refresh()
-      notify('Google Calendar disconnected.')
-    },
-    onError: (e) => notify(errorMessage(e), 'error'),
-  })
+  const refresh = () => client.invalidateQueries({ queryKey: INTEGRATIONS_KEY })
   const retry = useMutation({
     mutationFn: (id: number) => adminApi.post(`/admin/integrations/jobs/${id}/retry`),
     onSuccess: () => {
@@ -88,17 +33,8 @@ export default function IntegrationsPage() {
   if (data.isLoading) return <Spinner />
   if (data.isError) return <ErrorNote error={data.error} onRetry={() => data.refetch()} />
   const d = data.data!
-  const g = d.google_calendar
-
-  const onDisconnect = async () => {
-    const ok = await confirm({
-      title: 'Disconnect Google Calendar?',
-      body: 'New bookings will not be added to the calendar and no Meet links will be created until it is reconnected. Existing events are left in place.',
-      confirmLabel: 'Disconnect',
-      danger: true,
-    })
-    if (ok) disconnect.mutate()
-  }
+  const g = d.google
+  const googleHealthy = g.status === 'connected' && g.missing_scopes.length === 0
 
   return (
     <>
@@ -110,17 +46,6 @@ export default function IntegrationsPage() {
           </>
         }
       />
-      {googleResult && (
-        <div className="mb-6 flex items-start justify-between gap-4">
-          <div className="flex-1">
-            <Notice tone={googleResult.tone}>{googleResult.text}</Notice>
-          </div>
-          <AButton variant="ghost" onClick={() => setParams({}, { replace: true })}>
-            Dismiss
-          </AButton>
-        </div>
-      )}
-
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Jobs waiting" value={d.queues.jobs_pending} hint={d.queues.jobs_pending > 50 ? 'Check the worker is running' : 'Background worker queue'} />
         <Stat label="Jobs failed" value={d.queues.jobs_failed} />
@@ -130,38 +55,22 @@ export default function IntegrationsPage() {
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Panel
-          title="Google Calendar & Meet"
+          title="Google Workspace"
           actions={
-            g.configured &&
-            (g.status === 'disconnected' ? (
-              <AButton variant="primary" className="!py-1" loading={connect.isPending} onClick={() => connect.mutate()}>
-                Connect
-              </AButton>
-            ) : (
-              <>
-                {g.status === 'needs_reauth' && (
-                  <AButton variant="primary" className="!py-1" loading={connect.isPending} onClick={() => connect.mutate()}>
-                    Reconnect
-                  </AButton>
-                )}
-                <AButton variant="ghost" className="!py-1" loading={disconnect.isPending} onClick={onDisconnect}>
-                  Disconnect
-                </AButton>
-              </>
-            ))
+            <Link to={GOOGLE_PAGE} className="text-[0.65rem] uppercase tracking-[0.18em] text-champagne-200 hover:underline">
+              Manage
+            </Link>
           }
         >
           {!g.configured ? (
-            <Notice tone="warn">Google OAuth credentials (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI) are not set for this environment. Bookings are confirmed normally but no calendar events or Meet links are created.</Notice>
+            <Notice tone="warn">Google OAuth credentials are not set for this environment. Bookings are confirmed normally, but no calendar events, Meet links or Gmail messages are created.</Notice>
           ) : (
             <KeyValues
               items={[
-                ['Status', <Badge key="s" tone={g.status === 'connected' ? 'green' : g.status === 'needs_reauth' ? 'red' : 'muted'}>{g.status === 'needs_reauth' ? 'Needs reconnecting' : humanizeSlug(g.status)}</Badge>],
-                ['Account', g.account_email],
-                ['Calendar', g.calendar_id],
+                ['Status', <Badge key="s" tone={googleHealthy ? 'green' : g.status === 'disconnected' ? 'muted' : 'red'}>{g.status === 'needs_reauth' ? 'Reauthorization required' : g.status === 'disconnected' ? 'Not connected' : googleHealthy ? 'Connected' : 'Permission missing'}</Badge>],
+                ['Account', g.account_email ?? '—'],
+                ['Gmail · Calendar · Meet', `${g.services.gmail.status === 'connected' ? 'OK' : '—'} · ${g.services.calendar.status === 'connected' ? 'OK' : '—'} · ${g.services.meet.status === 'connected' ? 'OK' : '—'}`],
                 ['Last sync', formatAdminDateTime(g.last_synced_at)],
-                ...(g.last_error ? ([['Last error', <span key="e" className="text-danger-300">{g.last_error}</span>]] as [string, ReactNode][]) : []),
-                ['Redirect URI', g.redirect_uri ? <Copyable key="r" value={g.redirect_uri} /> : '—'],
               ]}
             />
           )}

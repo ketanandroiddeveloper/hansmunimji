@@ -30,6 +30,8 @@ final class FakeGateway implements PaymentGateway
 
     public string $refundStatus = 'pending';
     public bool $failRefunds = false;
+    /** Simulates the provider's API being unreachable for orders and lookups (webhooks still arrive). */
+    public bool $unavailable = false;
 
     /** @var array<string, VerifiedPayment> */
     private array $outcomes = [];
@@ -62,6 +64,9 @@ final class FakeGateway implements PaymentGateway
 
     public function createOrder(PaymentIntent $intent): GatewayOrder
     {
+        if ($this->unavailable) {
+            throw new GatewayError('Provider unavailable (test).');
+        }
         $orderId = $this->name . '_order_' . (++$this->sequence);
         $this->orders[$orderId] = $intent;
 
@@ -85,11 +90,18 @@ final class FakeGateway implements PaymentGateway
 
     public function verifyClientPayload(array $payload): VerifiedPayment
     {
+        if ($this->unavailable) {
+            throw new GatewayError('Provider unavailable (test).');
+        }
+
         return $this->outcomes[(string) ($payload['order_id'] ?? '')] ?? throw new InvalidSignature('Unknown order.');
     }
 
     public function fetchByOrder(string $orderId): VerifiedPayment
     {
+        if ($this->unavailable) {
+            throw new GatewayError('Provider unavailable (test).');
+        }
         $intent = $this->orders[$orderId] ?? throw new GatewayError('Unknown order.');
 
         return $this->outcomes[$orderId] ?? new VerifiedPayment($orderId, null, VerifiedPayment::PENDING, $intent->amountMinor, $intent->currency);

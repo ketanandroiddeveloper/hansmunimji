@@ -94,14 +94,8 @@ final class RazorpayGateway implements PaymentGateway
         if (($payment['order_id'] ?? null) !== $orderId) {
             throw new InvalidSignature('Payment does not belong to this order.');
         }
-        if (($payment['status'] ?? '') === 'authorized') {
-            $payment = $this->request('POST', 'payments/' . rawurlencode($paymentId) . '/capture', [
-                'amount' => (int) $payment['amount'],
-                'currency' => (string) $payment['currency'],
-            ]);
-        }
 
-        return $this->toVerified($orderId, $payment);
+        return $this->toVerified($orderId, $this->captureIfAuthorized($payment));
     }
 
     public function parseWebhook(string $rawBody, array $headers): WebhookEvent
@@ -153,14 +147,42 @@ final class RazorpayGateway implements PaymentGateway
     {
         $payments = $this->request('GET', 'orders/' . rawurlencode($orderId) . '/payments');
         $items = $payments['items'] ?? [];
-        foreach ($items as $payment) {
-            if (($payment['status'] ?? '') === 'captured') {
-                return $this->toVerified($orderId, $payment);
-            }
+        $byStatus = static fn (string $status): ?array => array_values(array_filter($items, static fn (array $p): bool => ($p['status'] ?? '') === $status))[0] ?? null;
+
+        if ($captured = $byStatus('captured')) {
+            return $this->toVerified($orderId, $captured);
         }
+        // Money is reserved but uncaptured (browser closed before verification): capture it like the verify path does,
+        // otherwise Razorpay returns it to the client after a few days.
+        if ($authorized = $byStatus('authorized')) {
+            return $this->toVerified($orderId, $this->captureIfAuthorized($authorized));
+        }
+
+        // Razorpay lists the latest attempt first.
+        if ($items !== [] && array_filter($items, static fn (array $p): bool => ($p['status'] ?? '') !== 'failed') === []) {
+            return $this->toVerified($orderId, $items[0]);
+        }
+
+        // No attempt yet, or one still in progress at the bank / UPI app.
         $order = $this->request('GET', 'orders/' . rawurlencode($orderId));
 
-        return new VerifiedPayment($orderId, null, $items === [] ? VerifiedPayment::PENDING : VerifiedPayment::FAILED, (int) $order['amount'], (string) $order['currency']);
+        return new VerifiedPayment($orderId, null, VerifiedPayment::PENDING, (int) $order['amount'], (string) $order['currency']);
+    }
+
+    /**
+     * @param array<string, mixed> $payment
+     * @return array<string, mixed>
+     */
+    private function captureIfAuthorized(array $payment): array
+    {
+        if (($payment['status'] ?? '') !== 'authorized') {
+            return $payment;
+        }
+
+        return $this->request('POST', 'payments/' . rawurlencode((string) $payment['id']) . '/capture', [
+            'amount' => (int) $payment['amount'],
+            'currency' => (string) $payment['currency'],
+        ]);
     }
 
     public function refund(string $paymentId, int $amountMinor, string $currency, string $idempotencyKey, string $reason): GatewayRefund
